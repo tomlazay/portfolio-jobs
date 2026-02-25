@@ -1,0 +1,312 @@
+/* ============================================================
+   Portfolio Jobs Board — Styles
+   Edit this file to change the look and feel of the page.
+   ============================================================ */
+
+/* ── RESET & BASE ── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background: #f7f8fa;
+  color: #1a1a2e;
+}
+
+/* ── DESIGN TOKENS ──
+   Change these variables to retheme the whole page at once. */
+:root {
+  --brand-primary:   #7c5cfc;   /* purple accent */
+  --brand-light:     #a78bfa;   /* lighter purple (hero headings, stats) */
+  --brand-hover:     #6b4ce0;   /* darker purple (button hover) */
+  --hero-bg-from:    #0f0c29;   /* hero gradient start */
+  --hero-bg-mid:     #1a1a4e;   /* hero gradient middle */
+  --hero-bg-to:      #24243e;   /* hero gradient end */
+  --page-bg:         #f7f8fa;   /* page background */
+  --card-bg:         #ffffff;   /* job card background */
+  --card-border:     #e5e7eb;   /* job card border */
+  --text-primary:    #1a1a2e;   /* main text */
+  --text-muted:      #6b7280;   /* secondary text */
+  --tag-location-bg: #f3f4f6;  --tag-location-fg: #4b5563;
+  --tag-type-bg:     #ede9fe;  --tag-type-fg:     #6d28d9;
+  --tag-mode-bg:     #ecfdf5;  --tag-mode-fg:     #065f46;
+  --tag-dept-bg:     #fef3c7;  --tag-dept-fg:     #92400e;
+  --salary-color:    #059669;   /* green salary text */
+
+  /* Company logo colors — change these to match each company's brand */
+  --logo-posh-from:  #1a1a1a;  --logo-posh-to:   #3a3a3a;
+  --logo-north-from: #1a1a4e;  --logo-north-to:  #4c3fc4;
+  --logo-sent-from:  #0f5132;  --logo-sent-to:   #198754;
+}
+
+/* ── HERO ── */
+.hero {
+  background: linear-gradient(135deg, var(--hero-bg-from) 0%, var(--hero-bg-mid) 50%, var(--hero-bg-to) 100%);
+  color: #fff;
+  padding: 56px 24px 48px;
+  text-align: center;
+}
+.hero-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 18px;
+}
+.hero-brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand-primary);
+}
+.hero h1 {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 10px;
+}
+.hero h1 span { color: var(--brand-light); }
+.hero p {
+  font-size: 16px;
+  opacity: 0.65;
+  margin-bottom: 36px;
+}
+.hero-stats {
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+}
+.hero-stat { text-align: center; }
+.hero-stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--brand-light);
+}
+.hero-stat-label {
+  font-size: 12px;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+
+/* ── SEARCH & FILTERS ── */
+.controls {
+  max-width: 1000px;
+  margin: -24px auto 0;
+  padding: 0 24px;
+  position: relative;
+  z-index: 10;
+}
+.search-bar {
+  background: var(--card-bg);
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.search-bar svg { color: #9ca3af; flex-shrink: 0; }
+.search-bar input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: var(--text-primary);
+  background: transparent;
+}
+.search-bar input::placeholder { color: #9ca3af; }
+.search-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  background: #f3f4f6;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--card-bg)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")
+    no-repeat right 10px center;
+  border: 1.5px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px 30px 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.filter-select:focus { outline: none; border-color: var(--brand-primary); }
+.filter-select:hover { border-color: var(--brand-primary); }
+
+.clear-btn {
+  background: none;
+  border: 1.5px solid var(--card-border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.clear-btn:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+
+/* ── JOB LIST ── */
+.main {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.results-label { font-size: 14px; color: var(--text-muted); }
+.results-label strong { color: var(--text-primary); }
+
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── JOB CARD ── */
+.job-card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  border: 1.5px solid var(--card-border);
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.15s;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.job-card:hover {
+  border-color: var(--brand-primary);
+  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.1);
+  transform: translateY(-1px);
+}
+
+/* ── COMPANY LOGOS ── */
+.company-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.logo-posh  { background: linear-gradient(135deg, var(--logo-posh-from),  var(--logo-posh-to));  }
+.logo-north { background: linear-gradient(135deg, var(--logo-north-from), var(--logo-north-to)); }
+.logo-sent  { background: linear-gradient(135deg, var(--logo-sent-from),  var(--logo-sent-to));  }
+
+/* ── JOB INFO ── */
+.job-info { flex: 1; min-width: 0; }
+.job-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.job-company {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+.job-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.job-tag {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+.tag-location { background: var(--tag-location-bg); color: var(--tag-location-fg); }
+.tag-type     { background: var(--tag-type-bg);     color: var(--tag-type-fg);     }
+.tag-mode     { background: var(--tag-mode-bg);     color: var(--tag-mode-fg);     }
+.tag-dept     { background: var(--tag-dept-bg);     color: var(--tag-dept-fg);     }
+
+.job-comp {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--salary-color);
+  white-space: nowrap;
+  text-align: right;
+  flex-shrink: 0;
+}
+.job-comp-equity {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+/* ── APPLY BUTTON ── */
+.apply-btn {
+  background: var(--brand-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s;
+}
+.apply-btn:hover { background: var(--brand-hover); }
+
+/* ── EMPTY STATE ── */
+.no-results {
+  text-align: center;
+  padding: 64px 24px;
+  color: #9ca3af;
+  font-size: 15px;
+  display: none;
+}
+.no-results svg {
+  display: block;
+  margin: 0 auto 12px;
+  color: #d1d5db;
+}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 640px) {
+  .hero h1 { font-size: 26px; }
+  .hero-stats { gap: 24px; }
+  .job-comp, .apply-btn { display: none; }
+  .job-card { gap: 12px; }
+}
