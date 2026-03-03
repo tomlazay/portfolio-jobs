@@ -1,88 +1,101 @@
 /* ============================================================
    Portfolio Jobs Board — Styles
-   Edit this file to change the look and feel of the page.
+   Brand: CompanyOn Ventures
    ============================================================ */
 
 /* ── RESET & BASE ── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background: #f7f8fa;
-  color: #1a1a2e;
+  background: var(--page-bg);
+  color: var(--text-primary);
 }
 
 /* ── DESIGN TOKENS ──
+   CompanyOn Ventures brand palette.
    Change these variables to retheme the whole page at once. */
 :root {
-  --brand-primary:   #7c5cfc;   /* purple accent */
-  --brand-light:     #a78bfa;   /* lighter purple (hero headings, stats) */
-  --brand-hover:     #6b4ce0;   /* darker purple (button hover) */
-  --hero-bg-from:    #0f0c29;   /* hero gradient start */
-  --hero-bg-mid:     #1a1a4e;   /* hero gradient middle */
-  --hero-bg-to:      #24243e;   /* hero gradient end */
-  --page-bg:         #f7f8fa;   /* page background */
-  --card-bg:         #ffffff;   /* job card background */
-  --card-border:     #e5e7eb;   /* job card border */
-  --text-primary:    #1a1a2e;   /* main text */
-  --text-muted:      #6b7280;   /* secondary text */
-  --tag-location-bg: #f3f4f6;  --tag-location-fg: #4b5563;
-  --tag-type-bg:     #ede9fe;  --tag-type-fg:     #6d28d9;
-  --tag-mode-bg:     #ecfdf5;  --tag-mode-fg:     #065f46;
-  --tag-dept-bg:     #fef3c7;  --tag-dept-fg:     #92400e;
-  --salary-color:    #059669;   /* green salary text */
-
-  /* Company logo colors — change these to match each company's brand */
-  --logo-posh-from:  #1a1a1a;  --logo-posh-to:   #3a3a3a;
-  --logo-north-from: #1a1a4e;  --logo-north-to:  #4c3fc4;
-  --logo-sent-from:  #0f5132;  --logo-sent-to:   #198754;
+  --brand-primary:   #4300EC;   /* CompanyOn electric blue-violet */
+  --brand-light:     #20A3FF;   /* CompanyOn light blue */
+  --brand-hover:     #3200b8;   /* darker for button hover */
+  --brand-teal:      #64F3F8;   /* CompanyOn teal (hero stats, C mark) */
+  --brand-magenta:   #D70189;   /* CompanyOn magenta (hero accent) */
+  --hero-bg-from:    #0A1541;   /* CompanyOn dark navy */
+  --hero-bg-mid:     #120840;   /* deep navy-violet */
+  --hero-bg-to:      #0d1850;   /* rich dark navy */
+  --page-bg:         #F4F7FF;   /* CompanyOn off-white */
+  --card-bg:         #ffffff;
+  --card-border:     #e0e4f0;
+  --text-primary:    #0A1541;   /* CompanyOn dark blue */
+  --text-muted:      #485355;   /* CompanyOn gray */
+  --tag-location-bg: #eef1ff;  --tag-location-fg: #3347c4;
+  --tag-type-bg:     #ede9fe;  --tag-type-fg:     #4300EC;
+  --tag-mode-bg:     #e7f8ff;  --tag-mode-fg:     #0069c4;
+  --tag-dept-bg:     #fff0f9;  --tag-dept-fg:     #a0006e;
+  --salary-color:    #059669;
 }
 
 /* ── HERO ── */
 .hero {
   background: linear-gradient(135deg, var(--hero-bg-from) 0%, var(--hero-bg-mid) 50%, var(--hero-bg-to) 100%);
   color: #fff;
-  padding: 56px 24px 48px;
+  padding: 56px 24px 52px;
   text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+/* ambient glow accents */
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -80px; right: -80px;
+  width: 360px; height: 360px;
+  background: radial-gradient(circle, rgba(100,243,248,0.07) 0%, transparent 65%);
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: -60px; left: -60px;
+  width: 280px; height: 280px;
+  background: radial-gradient(circle, rgba(67,0,236,0.12) 0%, transparent 65%);
+  pointer-events: none;
 }
 .hero-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.7;
-  margin-bottom: 18px;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
+  position: relative;
 }
-.hero-brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--brand-primary);
+.hero-logo {
+  height: 80px;
+  width: auto;
 }
 .hero h1 {
-  font-size: 36px;
-  font-weight: 700;
+  font-size: 38px;
+  font-weight: 800;
   letter-spacing: -0.5px;
   margin-bottom: 10px;
+  position: relative;
 }
-.hero h1 span { color: var(--brand-light); }
+.hero h1 span { color: var(--brand-magenta); }
 .hero p {
   font-size: 16px;
   opacity: 0.65;
   margin-bottom: 36px;
+  position: relative;
 }
 .hero-stats {
   display: flex;
   justify-content: center;
   gap: 48px;
+  position: relative;
 }
 .hero-stat { text-align: center; }
 .hero-stat-num {
   font-size: 28px;
   font-weight: 700;
-  color: var(--brand-light);
+  color: var(--brand-teal);
 }
 .hero-stat-label {
   font-size: 12px;
@@ -104,7 +117,7 @@ body {
   background: var(--card-bg);
   border-radius: 14px;
   padding: 16px 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 32px rgba(10, 21, 65, 0.15);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -124,7 +137,7 @@ body {
   font-size: 13px;
   color: var(--text-muted);
   white-space: nowrap;
-  background: #f3f4f6;
+  background: #eef1ff;
   padding: 4px 10px;
   border-radius: 20px;
 }
@@ -203,27 +216,50 @@ body {
 }
 .job-card:hover {
   border-color: var(--brand-primary);
-  box-shadow: 0 4px 16px rgba(124, 92, 252, 0.1);
+  box-shadow: 0 4px 20px rgba(67, 0, 236, 0.10);
   transform: translateY(-1px);
 }
 
-/* ── COMPANY LOGOS ── */
-.company-logo {
-  width: 46px;
-  height: 46px;
+/* ── COMPANY LOGO BADGES ── */
+.company-logo-wrap {
+  width: 74px;
+  height: 48px;
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
-  color: #fff;
   flex-shrink: 0;
-  letter-spacing: -0.5px;
+  overflow: hidden;
+  border: 1.5px solid var(--card-border);
 }
-.logo-posh  { background: linear-gradient(135deg, var(--logo-posh-from),  var(--logo-posh-to));  }
-.logo-north { background: linear-gradient(135deg, var(--logo-north-from), var(--logo-north-to)); }
-.logo-sent  { background: linear-gradient(135deg, var(--logo-sent-from),  var(--logo-sent-to));  }
+.company-logo-img {
+  max-width: 82%;
+  max-height: 68%;
+  object-fit: contain;
+  display: block;
+}
+/* Per-company badge backgrounds */
+.logo-posh      { background: #ffffff; }
+.logo-north     { background: #1e1b2e; border-color: #2d2a3e; }
+.logo-sent      { background: #ffffff; }
+.logo-cyvl      { background: #ffffff; }
+.logo-flex      { background: #ffffff; }
+.logo-daylit    { background: #ffffff; }
+.logo-allstacks { background: #ffffff; }
+.logo-roadsync  { background: #ffffff; }
+.logo-ziflow    { background: #ffffff; }
+.logo-fullcast  { background: #0a0f1e; border-color: #1a2040; }
+.logo-arpio     { background: #ffffff; }
+.logo-apty      { background: #ffffff; }
+.logo-endvr     { background: #f5f5f5; }
+/* Fallback for companies not yet in COMPANY_CONFIG */
+.logo-default   { background: var(--brand-primary); border-color: var(--brand-primary); }
+.logo-text-fallback {
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 20px;
+  line-height: 1;
+}
 
 /* ── JOB INFO ── */
 .job-info { flex: 1; min-width: 0; }
@@ -242,7 +278,7 @@ body {
 .job-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 .job-tag {
@@ -256,19 +292,27 @@ body {
 .tag-mode     { background: var(--tag-mode-bg);     color: var(--tag-mode-fg);     }
 .tag-dept     { background: var(--tag-dept-bg);     color: var(--tag-dept-fg);     }
 
+/* ── JOB RIGHT COLUMN (salary + apply) ── */
+.job-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .job-comp {
   font-size: 13px;
   font-weight: 600;
   color: var(--salary-color);
   white-space: nowrap;
   text-align: right;
-  flex-shrink: 0;
 }
 .job-comp-equity {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 400;
-  margin-top: 2px;
+  text-align: right;
+  margin-top: 1px;
 }
 
 /* ── APPLY BUTTON ── */
@@ -289,6 +333,34 @@ body {
 }
 .apply-btn:hover { background: var(--brand-hover); }
 
+/* ── LOADING STATE ── */
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 24px;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--card-border);
+  border-top-color: var(--brand-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.load-error {
+  text-align: center;
+  padding: 64px 24px;
+  color: #c0392b;
+  font-size: 15px;
+}
+
 /* ── EMPTY STATE ── */
 .no-results {
   text-align: center;
@@ -303,10 +375,70 @@ body {
   color: #d1d5db;
 }
 
-/* ── RESPONSIVE ── */
+/* ── RESPONSIVE — tablet ── */
+@media (max-width: 768px) {
+  .hero h1 { font-size: 32px; }
+  .job-comp, .apply-btn { font-size: 12px; }
+}
+
+/* ── RESPONSIVE — mobile ── */
 @media (max-width: 640px) {
+  .hero { padding: 40px 20px 40px; }
   .hero h1 { font-size: 26px; }
-  .hero-stats { gap: 24px; }
-  .job-comp, .apply-btn { display: none; }
-  .job-card { gap: 12px; }
+  .hero-stats { gap: 28px; }
+  .hero-stat-num { font-size: 22px; }
+
+  .controls { padding: 0 16px; }
+  .search-bar { padding: 13px 16px; }
+
+  .main { padding: 20px 16px 48px; }
+
+  .job-card {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 16px;
+    align-items: flex-start;
+  }
+
+  /* Logo stays top-left */
+  .company-logo-wrap {
+    width: 52px;
+    height: 40px;
+    border-radius: 8px;
+  }
+
+  /* Title/meta fills the row next to logo */
+  .job-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Salary + Apply become a full-width bottom row */
+  .job-right {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 10px;
+    border-top: 1px solid var(--card-border);
+    flex-shrink: unset;
+    gap: 12px;
+  }
+
+  .job-comp { text-align: left; white-space: normal; }
+  .job-comp-equity { text-align: left; }
+
+  .apply-btn {
+    flex-shrink: 0;
+  }
+
+  .filters { gap: 6px; }
+  .filter-select {
+    font-size: 12px;
+    padding: 7px 26px 7px 10px;
+  }
+  .clear-btn {
+    font-size: 12px;
+    padding: 7px 12px;
+  }
 }

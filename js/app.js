@@ -1,44 +1,235 @@
 /* ============================================================
-   app.js — Render & Filter Logic
-   You shouldn't need to edit this often. To add a new company,
-   add entries to jobs.js and then add the company's logo text
-   and CSS class name to the LOGOS and LOGO_CLASS objects below.
+   app.js — Render, Filter & URL-param Logic
+   Jobs are now fetched live from /api/jobs (Vercel function).
    ============================================================ */
 
-// ── Company logo config ──────────────────────────────────────
-// LOGOS:     text shown inside the logo badge
-// LOGO_CLASS: matches a .logo-<name> rule in styles.css
-const LOGOS = {
-  POSH:  'POSH',
-  North: 'N↑',
-  Sent:  'SND',
+// ── Company logo / badge config ───────────────────────────────
+// Add an entry here for each new company to set its logo + badge colour.
+// If a company has no entry, a text fallback is shown automatically.
+const COMPANY_CONFIG = {
+  POSH: {
+    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/06fc6f03-fc47-4801-9d96-04d7db0270de/42c725d4-e44d-40f6-9169-1f662c6e8dc3/81d4c492-920a-4150-888f-ddf264037875.png',
+    logoClass: 'logo-posh',
+  },
+  North: {
+    logoUrl:   'https://cdn.prod.website-files.com/665f27834e206c9660b3a626/6666c21949694bf640928b34_north-word.svg',
+    logoClass: 'logo-north',
+  },
+  Sent: {
+    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/776013c9-4de4-4cdd-b5a7-0ab17b9791d8/d3fbe472-82d1-4fc9-9c37-5322c55db2f8/76cbf1d4-20f2-4898-acd8-d37de9156af1.png',
+    logoClass: 'logo-sent',
+  },
+  Cyvl: {
+    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/9467653c-17ee-4657-ab6a-7e00dffbd287/2b05a9c8-159b-4e81-acb0-b1b54e0fa478/5f1f21e6-6abf-4d28-aec5-718b2d77c480.png',
+    logoClass: 'logo-cyvl',
+  },
+  Flex: {
+    logoUrl:   'https://lever-client-logos.s3.us-west-2.amazonaws.com/5015e948-36ab-4fc9-9aa4-6a006728f2e2-1693924947628.png',
+    logoClass: 'logo-flex',
+  },
+  Daylit: {
+    logoUrl:   'https://inflow-public.s3.amazonaws.com/company-logos/rpir2q831nuncesanw4cbmy1geyv.png',
+    logoClass: 'logo-daylit',
+  },
+  Allstacks: {
+    logoUrl:   'https://storage.googleapis.com/dover-django/client-logos/d0146d97-c838-4200-8596-7ebd43c29d73-1724783651-logo',
+    logoClass: 'logo-allstacks',
+  },
+  RoadSync: {
+    logoUrl:   'https://images.teamtailor-cdn.com/images/s3/teamtailor-production/logotype-v3/image_uploads/4c75203a-3df8-462d-a7b1-6821200ba318/original.jpeg',
+    logoClass: 'logo-roadsync',
+  },
+  Ziflow: {
+    logoUrl:   'https://www.ziflow.com/hubfs/Ziflow%20logo%20-%20let%20your%20content%20flow.svg',
+    logoClass: 'logo-ziflow',
+  },
+  Fullcast: {
+    logoUrl:   'https://www.fullcast.com/wp-content/uploads/2025/01/Fullcast-logo-white.svg',
+    logoClass: 'logo-fullcast',
+  },
+  Arpio: {
+    logoUrl:   'https://arpio.io/wp-content/uploads/2022/09/arpio-logo.svg',
+    logoClass: 'logo-arpio',
+  },
+  Apty: {
+    logoUrl:   'https://apty.ai/wp-content/uploads/2025/03/logo.svg',
+    logoClass: 'logo-apty',
+  },
+  ENDVR: {
+    logoUrl:   'https://endvr.io/assets/endvr-logo-B8qymlBx.webp',
+    logoClass: 'logo-endvr',
+  },
 };
 
-const LOGO_CLASS = {
-  POSH:  'logo-posh',
-  North: 'logo-north',
-  Sent:  'logo-sent',
-};
+// ── App state ─────────────────────────────────────────────────
+let ALL_JOBS = [];
 
-// ── Render ───────────────────────────────────────────────────
+// ── Fetch jobs from serverless API ───────────────────────────
+async function fetchJobs() {
+  showLoading(true);
+  try {
+    const res = await fetch('/api/jobs');
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const data = await res.json();
+
+    ALL_JOBS = data.jobs || [];
+
+    // Update hero stats
+    const companyCount = document.getElementById('company-count');
+    const totalCount   = document.getElementById('total-count');
+    if (companyCount) companyCount.textContent = (data.companies || []).length || new Set(ALL_JOBS.map(j => j.company)).size;
+    if (totalCount)   totalCount.textContent   = ALL_JOBS.length;
+
+    // Apply any URL params (shareable links) before first render
+    applyUrlParams();
+
+    // update() will call updateFilters() which populates all dropdowns,
+    // then render the matching jobs.
+    update();
+  } catch (err) {
+    showLoading(false);
+    showError(err.message);
+  }
+}
+
+// ── Loading / error states ────────────────────────────────────
+function showLoading(on) {
+  const el = document.getElementById('loading-state');
+  if (el) el.style.display = on ? 'flex' : 'none';
+}
+
+function showError(msg) {
+  showLoading(false);
+  const list = document.getElementById('jobs-list');
+  if (list) list.innerHTML =
+    `<div class="load-error">⚠️ Could not load jobs — ${msg}. Please try refreshing.</div>`;
+}
+
+// ── Location matching helper ──────────────────────────────────
+// "Remote" is a special pseudo-location — matches jobs where workMode is Remote.
+// All other values do a substring match on job.location.
+function matchesLocation(job, loc) {
+  if (!loc) return true;
+  if (loc === 'Remote') return (job.workMode || '').toLowerCase() === 'remote';
+  return job.location.toLowerCase().includes(loc.toLowerCase());
+}
+
+// ── Dependent/cascading filter logic ─────────────────────────
+// Returns the subset of ALL_JOBS that pass every active filter
+// EXCEPT the one identified by `excludeKey`.  Used to compute
+// what options are valid for each dropdown given everything else.
+function getFilteredExcluding(excludeKey) {
+  const q       = (document.getElementById('search-input')   || {}).value?.toLowerCase().trim() || '';
+  const company = excludeKey === 'company'  ? '' : (document.getElementById('filter-company')  || {}).value || '';
+  const dept    = excludeKey === 'dept'     ? '' : (document.getElementById('filter-dept')     || {}).value || '';
+  const loc     = excludeKey === 'location' ? '' : (document.getElementById('filter-location') || {}).value || '';
+  const type    = excludeKey === 'type'     ? '' : (document.getElementById('filter-type')     || {}).value || '';
+
+  return ALL_JOBS.filter(job => {
+    const hay = `${job.title} ${job.company} ${job.department} ${job.location}`.toLowerCase();
+    if (q       && !hay.includes(q))                              return false;
+    if (company && job.company !== company)                       return false;
+    if (dept    && job.department !== dept)                       return false;
+    if (!matchesLocation(job, loc))                               return false;
+    if (type    && job.type.replace('-',' ').toLowerCase() !==
+                   type.replace('-',' ').toLowerCase())           return false;
+    return true;
+  });
+}
+
+// Re-populate every filter dropdown so its options only show values
+// that exist in the jobs still reachable after applying all other filters.
+// Called on every update so dropdowns always stay in sync with the data.
+function updateFilters() {
+  const unique = (jobs, key) =>
+    [...new Set(jobs.map(j => j[key]).filter(Boolean))].sort();
+
+  fillSelect('filter-company',  unique(getFilteredExcluding('company'),  'company'));
+  fillSelect('filter-dept',     unique(getFilteredExcluding('dept'),     'department'));
+  fillSelect('filter-type',     unique(getFilteredExcluding('type'),     'type'));
+
+  // Location: real location values + synthetic "Remote" entry if any remote jobs exist
+  const locJobs    = getFilteredExcluding('location');
+  const locValues  = unique(locJobs, 'location');
+  const hasRemote  = locJobs.some(j => (j.workMode || '').toLowerCase() === 'remote');
+  if (hasRemote && !locValues.includes('Remote')) locValues.unshift('Remote');
+  fillSelect('filter-location', locValues);
+}
+
+function fillSelect(id, values) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const prev = sel.value;
+  while (sel.options.length > 1) sel.remove(1);   // keep "All X" placeholder
+  values.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value       = v;
+    opt.textContent = v;
+    sel.appendChild(opt);
+  });
+  // Restore previously selected value if it still exists in the new option set
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+// ── URL params — shareable filter links ──────────────────────
+// Reads ?q=&company=&dept=&loc=&type= and pre-fills the controls.
+function applyUrlParams() {
+  const p = new URLSearchParams(window.location.search);
+  setValue('search-input',    p.get('q'));
+  setValue('filter-company',  p.get('company'));
+  setValue('filter-dept',     p.get('dept'));
+  setValue('filter-location', p.get('loc'));
+  setValue('filter-type',     p.get('type'));
+}
+
+function setValue(id, val) {
+  if (!val) return;
+  const el = document.getElementById(id);
+  if (el) el.value = val;
+}
+
+// Writes current filter state back to the URL (no page reload).
+function syncUrlParams() {
+  const params = new URLSearchParams();
+  const get = id => (document.getElementById(id) || {}).value || '';
+
+  const q       = get('search-input').trim();
+  const company = get('filter-company');
+  const dept    = get('filter-dept');
+  const loc     = get('filter-location');
+  const type    = get('filter-type');
+
+  if (q)       params.set('q',       q);
+  if (company) params.set('company', company);
+  if (dept)    params.set('dept',    dept);
+  if (loc)     params.set('loc',     loc);
+  if (type)    params.set('type',    type);
+
+  const qs = params.toString();
+  history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+}
+
+// ── Render ────────────────────────────────────────────────────
 function renderJobs(jobs) {
-  const list       = document.getElementById('jobs-list');
-  const noResults  = document.getElementById('no-results');
-  const visCount   = document.getElementById('visible-count');
+  showLoading(false);
+
+  const list        = document.getElementById('jobs-list');
+  const noResults   = document.getElementById('no-results');
+  const visCount    = document.getElementById('visible-count');
   const searchCount = document.getElementById('search-count');
 
   list.innerHTML = '';
 
   if (!jobs.length) {
     noResults.style.display = 'block';
-    visCount.textContent    = '0';
-    searchCount.textContent = '0 jobs';
+    if (visCount)    visCount.textContent    = '0';
+    if (searchCount) searchCount.textContent = '0 jobs';
     return;
   }
 
   noResults.style.display = 'none';
-  visCount.textContent    = jobs.length;
-  searchCount.textContent = jobs.length + ' job' + (jobs.length !== 1 ? 's' : '');
+  if (visCount)    visCount.textContent    = jobs.length;
+  if (searchCount) searchCount.textContent = `${jobs.length} job${jobs.length !== 1 ? 's' : ''}`;
 
   jobs.forEach(job => {
     const card = document.createElement('a');
@@ -48,65 +239,79 @@ function renderJobs(jobs) {
     card.rel       = 'noopener noreferrer';
 
     const salaryHTML = job.compensation
-      ? `<div class="job-comp">${job.compensation}</div>`
-      : '';
+      ? `<div class="job-comp">${job.compensation}</div>` : '';
     const equityHTML = job.equity
-      ? `<div class="job-comp-equity">Offers Equity</div>`
-      : '';
+      ? `<div class="job-comp-equity">Offers equity</div>` : '';
+
+    const cfg       = COMPANY_CONFIG[job.company] || {};
+    const logoUrl   = cfg.logoUrl   || '';
+    const logoClass = cfg.logoClass || 'logo-default';
+
+    const logoInner = logoUrl
+      ? `<img class="company-logo-img" src="${logoUrl}" alt="${job.company}" loading="lazy">`
+      : `<span class="logo-text-fallback">${job.company.charAt(0)}</span>`;
 
     card.innerHTML = `
-      <div class="company-logo ${LOGO_CLASS[job.company] || ''}">${LOGOS[job.company] || job.company[0]}</div>
+      <div class="company-logo-wrap ${logoClass}">
+        ${logoInner}
+      </div>
       <div class="job-info">
         <div class="job-title">${job.title}</div>
         <div class="job-company">${job.company}</div>
         <div class="job-meta">
-          ${job.location ? `<span class="job-tag tag-location">📍 ${job.location}</span>` : ''}
-          ${job.type     ? `<span class="job-tag tag-type">${job.type}</span>`             : ''}
-          ${job.workMode ? `<span class="job-tag tag-mode">${job.workMode}</span>`          : ''}
-          <span class="job-tag tag-dept">${job.department}</span>
+          ${job.location   ? `<span class="job-tag tag-location">📍 ${job.location}</span>`  : ''}
+          ${job.type       ? `<span class="job-tag tag-type">${job.type}</span>`              : ''}
+          ${job.workMode   ? `<span class="job-tag tag-mode">${job.workMode}</span>`          : ''}
+          ${job.department ? `<span class="job-tag tag-dept">${job.department}</span>`        : ''}
         </div>
       </div>
-      <div style="text-align:right;flex-shrink:0">
-        ${salaryHTML}${equityHTML}
+      <div class="job-right">
+        <div>${salaryHTML}${equityHTML}</div>
+        <a class="apply-btn" href="${job.url}" target="_blank" rel="noopener noreferrer"
+           onclick="event.stopPropagation()">Apply →</a>
       </div>
-      <a class="apply-btn" href="${job.url}" target="_blank" rel="noopener noreferrer"
-         onclick="event.stopPropagation()">Apply →</a>
     `;
 
     list.appendChild(card);
   });
 }
 
-// ── Filter ───────────────────────────────────────────────────
+// ── Filter ────────────────────────────────────────────────────
 function getFiltered() {
-  const q       = document.getElementById('search-input').value.toLowerCase().trim();
-  const company = document.getElementById('filter-company').value;
-  const dept    = document.getElementById('filter-dept').value;
-  const loc     = document.getElementById('filter-location').value;
-  const type    = document.getElementById('filter-type').value;
+  const q       = (document.getElementById('search-input')    || {}).value?.toLowerCase().trim() || '';
+  const company = (document.getElementById('filter-company')  || {}).value || '';
+  const dept    = (document.getElementById('filter-dept')     || {}).value || '';
+  const loc     = (document.getElementById('filter-location') || {}).value || '';
+  const type    = (document.getElementById('filter-type')     || {}).value || '';
 
-  return JOBS.filter(job => {
-    const haystack = `${job.title} ${job.company} ${job.department} ${job.location} ${job.compensation}`.toLowerCase();
-    if (q       && !haystack.includes(q))                               return false;
-    if (company && job.company !== company)                             return false;
-    if (dept    && job.department !== dept)                             return false;
-    if (loc     && !job.location.toLowerCase().includes(loc.toLowerCase())) return false;
-    if (type    && job.type !== type)                                   return false;
+  return ALL_JOBS.filter(job => {
+    const hay = `${job.title} ${job.company} ${job.department} ${job.location}`.toLowerCase();
+    if (q       && !hay.includes(q))                              return false;
+    if (company && job.company !== company)                       return false;
+    if (dept    && job.department !== dept)                       return false;
+    if (!matchesLocation(job, loc))                               return false;
+    if (type    && job.type.replace('-',' ').toLowerCase() !==
+                   type.replace('-',' ').toLowerCase())           return false;
     return true;
   });
 }
 
-function update()       { renderJobs(getFiltered()); }
+function update() {
+  updateFilters();   // re-compute dropdown options from the current filter context
+  syncUrlParams();
+  renderJobs(getFiltered());
+}
+
 function clearFilters() {
   ['search-input', 'filter-company', 'filter-dept', 'filter-location', 'filter-type']
-    .forEach(id => { document.getElementById(id).value = ''; });
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   update();
 }
 
-// ── Wire up events ───────────────────────────────────────────
+// ── Wire up events ────────────────────────────────────────────
 document.getElementById('search-input').addEventListener('input', update);
 ['filter-company', 'filter-dept', 'filter-location', 'filter-type']
   .forEach(id => document.getElementById(id).addEventListener('change', update));
 
-// ── Initial render ───────────────────────────────────────────
-renderJobs(JOBS);
+// ── Boot ─────────────────────────────────────────────────────
+fetchJobs();

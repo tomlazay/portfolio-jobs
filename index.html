@@ -11,18 +11,17 @@
 <!-- HERO -->
 <div class="hero">
   <div class="hero-brand">
-    <div class="hero-brand-dot"></div>
-    CompanyOn Ventures
+    <img src="companyon-logo-full-on-dark_vert.svg" alt="CompanyOn Ventures" class="hero-logo">
   </div>
   <h1>Jobs in Our <span>Portfolio</span></h1>
   <p>Explore open roles across our portfolio companies</p>
   <div class="hero-stats">
     <div class="hero-stat">
-      <div class="hero-stat-num">3</div>
+      <div class="hero-stat-num" id="company-count">—</div>
       <div class="hero-stat-label">Companies</div>
     </div>
     <div class="hero-stat">
-      <div class="hero-stat-num" id="total-count">29</div>
+      <div class="hero-stat-num" id="total-count">—</div>
       <div class="hero-stat-label">Open Roles</div>
     </div>
   </div>
@@ -36,39 +35,20 @@
       <line x1="21" y1="21" x2="16.65" y2="16.65"/>
     </svg>
     <input type="text" id="search-input" placeholder="Search by job title, company, or keyword…">
-    <span class="search-count" id="search-count">29 jobs</span>
+    <span class="search-count" id="search-count"></span>
   </div>
   <div class="filters">
     <select class="filter-select" id="filter-company">
       <option value="">All Companies</option>
-      <option value="POSH">POSH</option>
-      <option value="North">North</option>
-      <option value="Sent">Sent</option>
     </select>
     <select class="filter-select" id="filter-dept">
       <option value="">All Departments</option>
-      <option value="Admin">Admin</option>
-      <option value="Community">Community</option>
-      <option value="Data & Analytics">Data & Analytics</option>
-      <option value="Engineering">Engineering</option>
-      <option value="GTM">GTM</option>
-      <option value="Marketing">Marketing</option>
-      <option value="Partnerships">Partnerships</option>
-      <option value="Product & Design">Product & Design</option>
-      <option value="Sales">Sales</option>
     </select>
     <select class="filter-select" id="filter-location">
       <option value="">All Locations</option>
-      <option value="New York">New York</option>
-      <option value="Brooklyn">Brooklyn</option>
-      <option value="Remote">Remote</option>
     </select>
     <select class="filter-select" id="filter-type">
       <option value="">All Types</option>
-      <option value="Full time">Full Time</option>
-      <option value="Full-time">Full Time (alt)</option>
-      <option value="Part-time">Part Time</option>
-      <option value="Contract">Contract</option>
     </select>
     <button class="clear-btn" onclick="clearFilters()">Clear filters</button>
   </div>
@@ -77,10 +57,18 @@
 <!-- JOB LIST -->
 <div class="main">
   <div class="results-header">
-    <span class="results-label">Showing <strong id="visible-count">29</strong> open positions</span>
+    <span class="results-label">Showing <strong id="visible-count">—</strong> open positions</span>
   </div>
+
+  <!-- Loading state -->
+  <div class="loading-state" id="loading-state">
+    <div class="loading-spinner"></div>
+    <span>Loading latest jobs…</span>
+  </div>
+
   <div class="jobs-list" id="jobs-list"></div>
-  <div class="no-results" id="no-results">
+
+  <div class="no-results" id="no-results" style="display:none">
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
       <circle cx="11" cy="11" r="8"/>
       <line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -89,8 +77,6 @@
   </div>
 </div>
 
-<!-- Load job data, then the app logic -->
-<script src="js/jobs.js"></script>
 <script src="js/app.js"></script>
 
 </body>
