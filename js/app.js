@@ -169,9 +169,31 @@ function normalizeLocation(raw) {
   return abbreviateStates(raw);
 }
 
-// Run once after ALL_JOBS is populated to canonicalise location strings.
+// Canonical job-type map — collapses spelling/casing variants from different
+// job boards into a single consistent label.
+function normalizeJobType(raw) {
+  if (!raw) return raw;
+  const s = raw.trim();
+  // Full-time variants: "Full time", "Full-Time", "Fulltime", "full-time", etc.
+  if (/^full[\s-]?time$/i.test(s))         return 'Full-time';
+  // Part-time variants
+  if (/^part[\s-]?time$/i.test(s))         return 'Part-time';
+  // Contract + full-time hours
+  if (/contract.*full[\s-]?time/i.test(s)) return 'Contract (Full-time)';
+  // Contract + part-time hours
+  if (/contract.*part[\s-]?time/i.test(s)) return 'Contract (Part-time)';
+  // Plain contract
+  if (/^contract$/i.test(s))               return 'Contract';
+  return s;
+}
+
+// Run once after ALL_JOBS is populated to canonicalise location and type strings.
 function normalizeJobs(jobs) {
-  return jobs.map(j => ({ ...j, location: normalizeLocation(j.location) }));
+  return jobs.map(j => ({
+    ...j,
+    location: normalizeLocation(j.location),
+    type:     normalizeJobType(j.type),
+  }));
 }
 
 // ── Location matching helper ──────────────────────────────────
