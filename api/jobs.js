@@ -592,8 +592,10 @@ async function fetchMicro1Jobs(companyName) {
       const locType  = (job.location_type || job.work_type || job.work_mode || '').toLowerCase();
       const isRemote = locType.includes('remote') || job.remote === true || job.is_remote === true;
 
-      const rawType = job.engagement_type || job.employment_type || job.job_type || job.type || 'Full-time';
-      const jobType = rawType.charAt(0).toUpperCase() + rawType.slice(1);
+      // micro1 is a contractor platform; engagement_type ("full-time"/"part-time") describes hours,
+      // not employment type — all roles are Contracts.
+      const engType = (job.engagement_type || '').toLowerCase();
+      const jobType = engType ? `Contract (${engType.charAt(0).toUpperCase() + engType.slice(1)})` : 'Contract';
 
       allJobs.push({
         company:      companyName,
