@@ -491,18 +491,24 @@ async function fetchMicro1Jobs(companyName) {
   const allJobs = [];
   let page = 1;
 
-  // API requires Origin/Referer headers matching the Webflow frontend
-  // — without them the server returns 404.
+  // API requires Origin/Referer headers matching the Webflow frontend.
+  // The XHR call from micro1.ai frontend uses POST (not GET), hence
+  // bare GET requests get "Cannot GET" 404 from Express.
   const MICRO1_HEADERS = {
     ...SCRAPE_HEADERS,
-    'Accept':  'application/json',
-    'Origin':  'https://www.micro1.ai',
-    'Referer': 'https://www.micro1.ai/',
+    'Accept':       'application/json',
+    'Content-Type': 'application/json',
+    'Origin':       'https://www.micro1.ai',
+    'Referer':      'https://www.micro1.ai/',
   };
 
   while (true) {
     const url = `${BASE}?page=${page}&limit=${LIMIT}&keyword=`;
-    const res = await fetch(url, { headers: MICRO1_HEADERS });
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: MICRO1_HEADERS,
+      body:    JSON.stringify({ page, limit: LIMIT, keyword: '' }),
+    });
 
     // Capture body text first so we can include it in error messages
     const rawText = await res.text();
