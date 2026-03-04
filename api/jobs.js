@@ -914,11 +914,10 @@ async function fetchMicro1Jobs(companyName) {
     }
 
     for (const job of list) {
-      // Core team (micro1-internal) jobs have ideal_yearly_compensation set to a truthy
-      // but non-numeric value. Client contractor jobs always have a real number there
-      // (micro1 calculates pay rates for those). This is the reliable distinguishing signal.
-      const comp       = job.ideal_yearly_compensation;
-      const isCoreTeam = comp !== null && comp !== undefined && comp !== '' && isNaN(Number(comp));
+      // Core team (micro1-internal) jobs are tagged with "Core team" in job_tags.
+      // Client/contractor postings either have no tags or different tags.
+      const tags = Array.isArray(job.job_tags) ? job.job_tags : [];
+      const isCoreTeam = tags.some(t => /^core\s*team$/i.test(t));
       if (!isCoreTeam) continue;
 
       // micro1 API field names: job_id, job_name, apply_url, engagement_type, location_type
@@ -955,13 +954,20 @@ async function fetchMicro1Jobs(companyName) {
         location:     job.location   || job.city     || '',
         type:         jobType,
         workMode:     isRemote ? 'Remote' : 'On-site',
-        // For core team jobs, ideal_yearly_compensation IS the salary string
-        // (e.g. "$350K - $600K/yr"). Strip the /yr suffix then normalise.
-        compensation: formatSalary(
-          (job.salary || job.compensation ||
-           (typeof comp === 'string' ? comp : ''))
-          .replace(/\/yr\b/i, '').trim()
-        ),
+        // ideal_yearly_compensation is now an object {min, max} in whole dollars.
+        // e.g. {min: 140000, max: 280000} → "$140K – $280K"
+        const comp = job.ideal_yearly_compensation;
+        let rawComp = job.salary || job.compensation || '';
+        if (!rawComp && comp && typeof comp === 'object') {
+          const lo = comp.min != null ? Math.round(Number(comp.min) / 1000) : null;
+          const hi = comp.max != null ? Math.round(Number(comp.max) / 1000) : null;
+          if (lo && hi) rawComp = `${lo}K – ${hi}K`;
+          else if (hi)  rawComp = `${hi}K`;
+          else if (lo)  rawComp = `${lo}K`;
+        } else if (!rawComp && typeof comp === 'string') {
+          rawComp = comp.replace(/\/yr\b/i, '').trim();
+        }
+        compensation: formatSalary(rawComp),
         equity:       false,
         url:          jobUrl,
       });
@@ -977,9 +983,9 @@ async function fetchMicro1Jobs(companyName) {
   // surface key field values from the first job so we can identify the right filter.
   if (allJobs.length === 0 && totalSeen > 0) {
     throw new Error(
-      `micro1: ${totalSeen} jobs fetched but none passed Core team filter. ` +
+      `micro1: ${totalSeen} jobs fetched but none passed Core team filter (job_tags includes "Core team"). ` +
       `Sample is_micro1_account = ${JSON.stringify(sampleIsMicro1)}. ` +
-      `Check company_name / tags / is_core_team fields on the API response.`
+      `Check job_tags field on the API response.`
     );
   }
 
