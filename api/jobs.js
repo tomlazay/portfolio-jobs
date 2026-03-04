@@ -145,23 +145,20 @@ async function fetchPolymerJobs(pageUrl, companyName) {
     while (true) {
       const apiUrl = `https://api.polymer.co/v1/hire/organizations/${slug}/jobs`
                    + `?page=${apiPage}&per_page=${PER_PAGE}`;
+      // Use minimal headers for the REST API — avoid Origin/Referer which can
+      // trigger CORS pre-flight rejection from an unexpected server origin.
       const apiRes = await fetch(apiUrl, {
         headers: {
-          'Accept':          'application/json, text/plain, */*',
+          'Accept':          'application/json',
           'Accept-Language': SCRAPE_HEADERS['Accept-Language'],
-          'Accept-Encoding': SCRAPE_HEADERS['Accept-Encoding'],
           'User-Agent':      SCRAPE_HEADERS['User-Agent'],
-          'sec-ch-ua':       SCRAPE_HEADERS['sec-ch-ua'],
-          'sec-ch-ua-mobile':   SCRAPE_HEADERS['sec-ch-ua-mobile'],
-          'sec-ch-ua-platform': SCRAPE_HEADERS['sec-ch-ua-platform'],
-          'sec-fetch-dest':  'empty',
-          'sec-fetch-mode':  'cors',
-          'sec-fetch-site':  'same-site',
-          'Origin':          'https://jobs.polymer.co',
-          'Referer':         'https://jobs.polymer.co/',
         },
       });
-      if (!apiRes.ok) return null;   // signal HTTP failure to caller
+      if (!apiRes.ok) {
+        // Log actual status so we can distinguish 401/403/404 in error reports
+        console.warn(`Polymer API ${apiRes.status} for slug "${slug}" (page ${apiPage})`);
+        return null;   // signal HTTP failure to caller
+      }
 
       const apiData = await apiRes.json();
       if (apiPage === 1) rawSample = apiData;
@@ -194,13 +191,16 @@ async function fetchPolymerJobs(pageUrl, companyName) {
 
   // ── Strategy 1a: API with the slug from the Google Sheet ────
   let apiDiag = null;   // raw API response for diagnostics if all strategies fail
+  let apiStatus = null;
   try {
     const result = await tryPolymerApi(inputSlug);
     if (result) {
       apiDiag = result.rawSample;
       if (result.jobs.length > 0) return result.jobs;
     }
-  } catch (_) { /* fall through */ }
+  } catch (e) {
+    apiStatus = e.message;   // fall through
+  }
 
   // ── Strategies 2 & 3 require the HTML page ──────────────────
   // fetch() follows redirects automatically; .url gives the final URL.
@@ -295,12 +295,12 @@ async function fetchPolymerJobs(pageUrl, companyName) {
     const hasNextData = html.includes('__NEXT_DATA__');
     const apiSample = apiDiag
       ? JSON.stringify(apiDiag).slice(0, 300)
-      : '(API returned HTTP error or threw)';
+      : (apiStatus || '(API returned HTTP error — check Vercel logs for status code)');
     throw new Error(
       `Polymer: no jobs found for "${companyName}". ` +
       `Input slug: ${inputSlug}, resolved slug: ${resolvedSlug}. ` +
       `__NEXT_DATA__ present: ${hasNextData}. ` +
-      `API raw sample: ${apiSample}. ` +
+      `API result: ${apiSample}. ` +
       `HTML preview: ${html.slice(0, 300)}`
     );
   }
@@ -326,15 +326,35 @@ async function fetchDoverJobs(handle, companyName) {
     return res.json();
   }
 
-  // Step 1 — resolve handle → UUID
-  const slugRes = await fetch(
-    `https://app.dover.com/api/v1/careers-page-slug/${handle}`,
-    { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
-  );
-  if (!slugRes.ok) throw new Error(`Dover slug API failed for "${companyName}": ${slugRes.status}`);
-  const slugData = await safeJson(slugRes, 'slug API');
-  const uuid = slugData.id;
-  if (!uuid) throw new Error(`Dover: no UUID returned for "${companyName}" — response: ${JSON.stringify(slugData).slice(0, 100)}`);
+  // Dover's slug API is case-sensitive. The sheet URL may use a different casing
+  // (e.g. "allstacks") than Dover's actual slug (e.g. "Allstacks").
+  // Try the original handle first, then title-case fallback.
+  async function resolveSlug(rawHandle) {
+    const candidates = [
+      rawHandle,
+      rawHandle.charAt(0).toUpperCase() + rawHandle.slice(1),  // Title case
+    ];
+    // Deduplicate (in case rawHandle is already title-cased)
+    const unique = [...new Set(candidates)];
+    for (const candidate of unique) {
+      const r = await fetch(
+        `https://app.dover.com/api/v1/careers-page-slug/${candidate}`,
+        { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+      );
+      if (!r.ok) continue;
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('json')) continue;   // HTML response = wrong handle
+      const data = await r.json();
+      if (data.id) return { uuid: data.id, resolvedHandle: candidate };
+    }
+    throw new Error(
+      `Dover: could not resolve slug for "${companyName}" ` +
+      `(tried: ${unique.join(', ')})`
+    );
+  }
+
+  // Step 1 — resolve handle → UUID (with case-insensitive fallback)
+  const { uuid } = await resolveSlug(handle);
 
   const apiRes = await fetch(
     `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
