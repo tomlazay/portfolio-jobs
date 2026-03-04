@@ -1,5 +1,9 @@
 // ============================================================
-//  api/jobs.js — Vercel Serverless Function
+//  api/jobs.js — Vercel Edge Function (runtime: 'edge')
+//
+//  Runs on Cloudflare's edge network so outbound fetch() requests
+//  originate from Cloudflare IPs, which bypasses Cloudflare bot
+//  protection on third-party job boards (e.g. jobs.polymer.co).
 //
 //  Reads company list from Google Sheet, fetches live jobs
 //  from each company's job board, and returns a unified list.
@@ -19,6 +23,10 @@
 //
 //  Cached 24 hrs via Vercel CDN (s-maxage header).
 // ============================================================
+
+// Tell Vercel to run this function on the Edge (Cloudflare Workers) runtime.
+// This is required for outbound fetch() to originate from Cloudflare IPs.
+export const config = { runtime: 'edge' };
 
 const SHEET_CSV_URL =
   'https://docs.google.com/spreadsheets/d/1xWYzNKkfUYV18CL7DpX_Q_HstHuJR6-i76Jqxd9cRXs/export?format=csv&gid=0';
@@ -349,7 +357,8 @@ async function fetchDoverJobs(handle, companyName) {
     }
     throw new Error(
       `Dover: could not resolve slug for "${companyName}" ` +
-      `(tried: ${unique.join(', ')})`
+      `(tried: ${unique.join(', ')}) — ` +
+      `company may have moved off Dover; update sheet URL to their current job board`
     );
   }
 
@@ -811,11 +820,15 @@ function formatSalary(raw) {
 }
 
 // ── Main handler ─────────────────────────────────────────────
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=86400');
+// Uses Web API Request/Response (required by Edge Runtime).
+export default async function handler(req) {
+  const HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control':               's-maxage=86400, stale-while-revalidate=86400',
+    'Content-Type':                'application/json',
+  };
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: HEADERS });
 
   try {
     const companies = await fetchCompanies();
@@ -873,14 +886,20 @@ export default async function handler(req, res) {
       }
     }
 
-    res.json({
-      jobs:      allJobs,
-      companies: companies.map(c => c.name),
-      errors,
-      fetchedAt: new Date().toISOString(),
-    });
+    return new Response(
+      JSON.stringify({
+        jobs:      allJobs,
+        companies: companies.map(c => c.name),
+        errors,
+        fetchedAt: new Date().toISOString(),
+      }),
+      { headers: HEADERS }
+    );
   } catch (err) {
     console.error('Handler error:', err);
-    res.status(500).json({ error: err.message });
+    return new Response(
+      JSON.stringify({ error: err.message }),
+      { status: 500, headers: HEADERS }
+    );
   }
 }
