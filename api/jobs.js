@@ -611,10 +611,20 @@ async function fetchMicro1Jobs(companyName) {
       const locType  = (job.location_type || job.work_type || job.work_mode || '').toLowerCase();
       const isRemote = locType.includes('remote') || job.remote === true || job.is_remote === true;
 
-      // micro1 is a contractor platform; engagement_type ("full-time"/"part-time") describes hours,
-      // not employment type — all roles are Contracts.
+      // For Core team jobs, engagement_type is the actual employment type.
+      // Only label as Contract if the field itself contains the word "contract".
       const engType = (job.engagement_type || '').toLowerCase();
-      const jobType = engType ? `Contract (${engType.charAt(0).toUpperCase() + engType.slice(1)})` : 'Contract';
+      let jobType;
+      if (engType.includes('contract')) {
+        // e.g. "contract full-time" or "contract" → "Contract (Full-time)" or "Contract"
+        const hours = engType.replace(/contract/i, '').trim();
+        jobType = hours ? `Contract (${hours.charAt(0).toUpperCase() + hours.slice(1)})` : 'Contract';
+      } else if (engType) {
+        // e.g. "full-time" → "Full-time"
+        jobType = engType.charAt(0).toUpperCase() + engType.slice(1);
+      } else {
+        jobType = 'Full-time';
+      }
 
       allJobs.push({
         company:      companyName,
