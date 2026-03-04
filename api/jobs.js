@@ -507,7 +507,7 @@ async function fetchMicro1Jobs(companyName) {
     const res = await fetch(url, {
       method:  'POST',
       headers: MICRO1_HEADERS,
-      body:    JSON.stringify({ page, limit: LIMIT, keyword: '' }),
+      body:    JSON.stringify({ action: 'get_all_jobs', page, limit: LIMIT, keyword: '' }),
     });
 
     // Capture body text first so we can include it in error messages
