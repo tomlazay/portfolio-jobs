@@ -405,16 +405,28 @@ async function fetchCustomJobs(pageUrl, companyName) {
       .trim();
 
     const parts = rawText.split(/\n|\s{2,}/).map(s => s.trim()).filter(Boolean);
-    if (parts.length >= 1 && parts[0].length > 2) {
+
+    // Remove description blobs (>100 chars) and UI button labels
+    const UI_NOISE = /^(apply|apply now|view job|view role|learn more|see details|read more)$/i;
+    const cleanParts = parts.filter(p => p.length <= 100 && !UI_NOISE.test(p));
+
+    if (cleanParts.length >= 1 && cleanParts[0].length > 2) {
+      // Detect category-before-title layouts (e.g. Ziflow):
+      // Score each of the first two parts against the URL slug.
+      // If parts[1] matches the slug better, it's the real title and parts[0] is the dept.
+      const slugWords = (href.split('/').pop() || '').replace(/-/g, ' ').toLowerCase();
+      const score     = s => s.toLowerCase().split(/\s+/).filter(w => w.length > 2 && slugWords.includes(w)).length;
+      const titleIdx  = (slugWords && cleanParts.length > 1 && score(cleanParts[1]) > score(cleanParts[0])) ? 1 : 0;
+
       // href may be absolute (https://...) or relative (/path/slug)
       const jobUrl = href.startsWith('http') ? href : `${domain}${href}`;
       jobs.push({
         company:      companyName,
-        title:        parts[0],
-        department:   '',
-        location:     parts[1] || '',
-        type:         parts[2] || 'Full-time',
-        workMode:     parts[3] || 'Hybrid',
+        title:        cleanParts[titleIdx],
+        department:   titleIdx > 0 ? cleanParts[0] : '',
+        location:     cleanParts[titleIdx + 1] || '',
+        type:         cleanParts[titleIdx + 2] || 'Full-time',
+        workMode:     cleanParts[titleIdx + 3] || 'Hybrid',
         compensation: '',
         equity:       false,
         url:          jobUrl,
