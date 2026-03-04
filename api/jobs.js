@@ -91,22 +91,41 @@ async function fetchCompanies() {
 
 // ── Ashby ─────────────────────────────────────────────────────
 async function fetchAshbyJobs(handle, companyName) {
-  const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${handle}`);
+  // includeCompensation=true adds job.compensation object with structured salary data.
+  // Without it, no compensation fields are returned in the listing.
+  const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${handle}?includeCompensation=true`);
   if (!res.ok) throw new Error(`Ashby fetch failed for "${handle}": ${res.status}`);
   const data = await res.json();
 
-  return (data.jobs || []).map(job => ({
-    company:      companyName,
-    title:        (job.title || '').trim(),
-    department:   job.department || '',
-    location:     job.location   || '',
-    type:         ASHBY_TYPE_MAP[job.employmentType] || 'Full time',
-    workMode:     job.isRemote ? 'Remote' : (MODE_MAP[job.workplaceType] || 'On-site'),
-    // compensationTierSummary is a preformatted string e.g. "$80,000 – $120,000 USD"
-    compensation: formatSalary(job.compensationTierSummary || ''),
-    equity:       !!(job.secondaryCompensation),
-    url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
-  }));
+  return (data.jobs || []).map(job => {
+    // Only surface compensation when the company opted in to displaying it.
+    // job.compensation.scrapeableCompensationSalarySummary is a clean salary-only string
+    // e.g. "$180K - $220K". Fall back to compensationTierSummary (may include equity note)
+    // stripped of the equity suffix.
+    let rawComp = '';
+    if (job.shouldDisplayCompensationOnJobPostings && job.compensation) {
+      rawComp = job.compensation.scrapeableCompensationSalarySummary
+             || (job.compensation.compensationTierSummary || '').split(' • ')[0]
+             || '';
+    }
+
+    // Detect equity from compensation tier components (EquityCashValue / EquityPercentage)
+    const hasEquity = !!(job.compensation?.compensationTiers?.some(tier =>
+      tier.components?.some(c => c.compensationType?.startsWith('Equity'))
+    ));
+
+    return {
+      company:      companyName,
+      title:        (job.title || '').trim(),
+      department:   job.department || '',
+      location:     job.location   || '',
+      type:         ASHBY_TYPE_MAP[job.employmentType] || 'Full time',
+      workMode:     job.isRemote ? 'Remote' : (MODE_MAP[job.workplaceType] || 'On-site'),
+      compensation: formatSalary(rawComp),
+      equity:       hasEquity,
+      url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
+    };
+  });
 }
 
 // ── Lever ─────────────────────────────────────────────────────
@@ -948,8 +967,10 @@ async function fetchMicro1Jobs(companyName) {
 function formatSalary(raw) {
   if (!raw) return '';
 
-  // Already in compact K/M notation (e.g. "$80K – $100K"): return as-is
-  if (/^\$\d+[KkMm]\s*[–-]\s*\$\d+[KkMm]$/.test(raw.trim())) return raw.trim();
+  // Already in compact K/M notation (e.g. "$80K – $100K" or "$180K - $220K"):
+  // normalise the separator to an en-dash so all platforms render consistently.
+  if (/^\$\d+[KkMm]\s*[–-]\s*\$\d+[KkMm]$/.test(raw.trim()))
+    return raw.trim().replace(/\s*[-–]\s*/, ' – ');
 
   // Ashby: "$80,000 – $120,000 USD" or "$80,000 – $120,000 USD a year"
   // Extract dollar amounts with commas, convert to K notation
