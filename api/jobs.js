@@ -394,13 +394,17 @@ async function fetchCustomJobs(pageUrl, companyName) {
     seen.add(href);
 
     const rawText = match[2]
-      .replace(/<[^>]+>/g, ' ')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:p|div|li|h[1-6]|section|article|span)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
       .replace(/&amp;/g, '&')
       .replace(/&nbsp;/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n[ \t]*/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    const parts = rawText.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+    const parts = rawText.split(/\n|\s{2,}/).map(s => s.trim()).filter(Boolean);
     if (parts.length >= 1 && parts[0].length > 2) {
       // href may be absolute (https://...) or relative (/path/slug)
       const jobUrl = href.startsWith('http') ? href : `${domain}${href}`;
