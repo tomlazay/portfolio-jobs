@@ -211,7 +211,8 @@ function getFilteredExcluding(excludeKey) {
 // Called on every update so dropdowns always stay in sync with the data.
 function updateFilters() {
   const unique = (jobs, key) =>
-    [...new Set(jobs.map(j => j[key]).filter(Boolean))].sort();
+    [...new Set(jobs.map(j => j[key]).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
   fillSelect('filter-company',  unique(getFilteredExcluding('company'),  'company'));
   fillSelect('filter-dept',     unique(getFilteredExcluding('dept'),     'department'));
@@ -221,7 +222,11 @@ function updateFilters() {
   const locJobs    = getFilteredExcluding('location');
   const locValues  = unique(locJobs, 'location');
   const hasRemote  = locJobs.some(j => (j.workMode || '').toLowerCase() === 'remote');
-  if (hasRemote && !locValues.includes('Remote')) locValues.unshift('Remote');
+  if (hasRemote && !locValues.includes('Remote')) {
+    // Insert 'Remote' in its correct alphabetical position (between Q... and S...)
+    const idx = locValues.findIndex(v => v.localeCompare('Remote', undefined, { sensitivity: 'base' }) > 0);
+    if (idx === -1) locValues.push('Remote'); else locValues.splice(idx, 0, 'Remote');
+  }
   fillSelect('filter-location', locValues);
 }
 
