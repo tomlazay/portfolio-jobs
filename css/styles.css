@@ -442,3 +442,28 @@ body {
     padding: 7px 12px;
   }
 }
+
+/* ── FOOTER ── */
+.site-footer {
+  background: linear-gradient(135deg, var(--hero-bg-from) 0%, var(--hero-bg-mid) 50%, var(--hero-bg-to) 100%);
+  color: #fff;
+  padding: 20px 24px;
+  text-align: center;
+  margin-top: 48px;
+}
+.site-footer-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  opacity: 0.75;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.footer-divider {
+  opacity: 0.4;
+}
+.footer-updated #last-updated {
+  color: var(--brand-teal);
+  opacity: 1;
+}

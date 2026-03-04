@@ -80,6 +80,16 @@ async function fetchJobs() {
     if (companyCount) companyCount.textContent = (data.companies || []).length || new Set(ALL_JOBS.map(j => j.company)).size;
     if (totalCount)   totalCount.textContent   = ALL_JOBS.length;
 
+    // Populate footer "Last Updated" timestamp
+    const lastUpdatedEl = document.getElementById('last-updated');
+    if (lastUpdatedEl && data.fetchedAt) {
+      const d = new Date(data.fetchedAt);
+      lastUpdatedEl.textContent = d.toLocaleString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+      });
+    }
+
     // Apply any URL params (shareable links) before first render
     applyUrlParams();
 
