@@ -592,13 +592,11 @@ async function fetchMicro1Jobs(companyName) {
     }
 
     for (const job of list) {
-      // micro1 is a staffing marketplace. is_micro1_account === true flags CLIENT jobs
-      // (companies that post through micro1). micro1's own "Core team" roles are identified
-      // by the company/organization name being "micro1", or by a "core team" tag.
-      const companyField = (job.company_name || job.company || job.organization || job.employer || '').toLowerCase();
-      const tags     = Array.isArray(job.tags) ? job.tags : Array.isArray(job.job_tags) ? job.job_tags : [];
-      const tagStr   = tags.map(t => (typeof t === 'string' ? t : (t.name || t.label || ''))).join(' ').toLowerCase();
-      const isCoreTeam = companyField.includes('micro1') || tagStr.includes('core team') || job.is_core_team === true;
+      // Core team (micro1-internal) jobs have ideal_yearly_compensation set to a truthy
+      // but non-numeric value. Client contractor jobs always have a real number there
+      // (micro1 calculates pay rates for those). This is the reliable distinguishing signal.
+      const comp       = job.ideal_yearly_compensation;
+      const isCoreTeam = comp !== null && comp !== undefined && comp !== '' && isNaN(Number(comp));
       if (!isCoreTeam) continue;
 
       // micro1 API field names: job_id, job_name, apply_url, engagement_type, location_type
@@ -625,9 +623,8 @@ async function fetchMicro1Jobs(companyName) {
         location:     job.location   || job.city     || '',
         type:         jobType,
         workMode:     isRemote ? 'Remote' : 'On-site',
-        compensation: job.ideal_yearly_compensation
-                        ? `$${Math.round(job.ideal_yearly_compensation / 1000)}K`
-                        : (job.salary || job.compensation || ''),
+        // comp is non-numeric for core team jobs, so skip the $NaNK formatting
+        compensation: job.salary || job.compensation || '',
         equity:       false,
         url:          jobUrl,
       });
