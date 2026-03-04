@@ -12,7 +12,7 @@ const COMPANY_CONFIG = {
     logoClass: 'logo-posh',
   },
   North: {
-    logoUrl:   'https://cdn.prod.website-files.com/665f27834e206c9660b3a626/6666c21949694bf640928b34_north-word.svg',
+    logoUrl:   '/logos/north-logo.svg',
     logoClass: 'logo-north',
   },
   Sent: {
