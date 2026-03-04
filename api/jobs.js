@@ -44,12 +44,22 @@ const MODE_MAP = {
   remote:    'Remote',
 };
 
-// Common fetch headers for HTML scraping — browser-like to avoid 403s
+// Common fetch headers for HTML scraping — full browser fingerprint to bypass bot protection
 const SCRAPE_HEADERS = {
-  'User-Agent':      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-  'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Cache-Control':   'no-cache',
+  'User-Agent':                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language':           'en-US,en;q=0.9',
+  'Accept-Encoding':           'gzip, deflate, br',
+  'Cache-Control':             'no-cache',
+  'Pragma':                    'no-cache',
+  'sec-ch-ua':                 '"Google Chrome";v="121", "Not;A=Brand";v="8", "Chromium";v="121"',
+  'sec-ch-ua-mobile':          '?0',
+  'sec-ch-ua-platform':        '"macOS"',
+  'sec-fetch-dest':            'document',
+  'sec-fetch-mode':            'navigate',
+  'sec-fetch-site':            'none',
+  'sec-fetch-user':            '?1',
+  'upgrade-insecure-requests': '1',
 };
 
 // ── Fetch company list from Google Sheet ─────────────────────
@@ -136,7 +146,20 @@ async function fetchPolymerJobs(pageUrl, companyName) {
       const apiUrl = `https://api.polymer.co/v1/hire/organizations/${slug}/jobs`
                    + `?page=${apiPage}&per_page=${PER_PAGE}`;
       const apiRes = await fetch(apiUrl, {
-        headers: { 'Accept': 'application/json', 'User-Agent': SCRAPE_HEADERS['User-Agent'] },
+        headers: {
+          'Accept':          'application/json, text/plain, */*',
+          'Accept-Language': SCRAPE_HEADERS['Accept-Language'],
+          'Accept-Encoding': SCRAPE_HEADERS['Accept-Encoding'],
+          'User-Agent':      SCRAPE_HEADERS['User-Agent'],
+          'sec-ch-ua':       SCRAPE_HEADERS['sec-ch-ua'],
+          'sec-ch-ua-mobile':   SCRAPE_HEADERS['sec-ch-ua-mobile'],
+          'sec-ch-ua-platform': SCRAPE_HEADERS['sec-ch-ua-platform'],
+          'sec-fetch-dest':  'empty',
+          'sec-fetch-mode':  'cors',
+          'sec-fetch-site':  'same-site',
+          'Origin':          'https://jobs.polymer.co',
+          'Referer':         'https://jobs.polymer.co/',
+        },
       });
       if (!apiRes.ok) return null;   // signal HTTP failure to caller
 
@@ -183,13 +206,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   // fetch() follows redirects automatically; .url gives the final URL.
   // This is critical for renamed companies (e.g. sheet has /daylit but
   // Polymer redirects to /lendica — slug mismatch breaks link scraping).
-  const htmlRes = await fetch(baseUrl, {
-    headers: {
-      'User-Agent':      SCRAPE_HEADERS['User-Agent'],
-      'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-  });
+  const htmlRes = await fetch(baseUrl, { headers: SCRAPE_HEADERS });
   if (!htmlRes.ok) {
     throw new Error(
       `Polymer: HTML fetch failed for "${companyName}" (${baseUrl}): HTTP ${htmlRes.status}`
@@ -298,22 +315,33 @@ async function fetchPolymerJobs(pageUrl, companyName) {
 async function fetchDoverJobs(handle, companyName) {
   const pageUrl = `https://app.dover.com/jobs/${handle}`;
 
+  // Helper: parse JSON only if response is actually JSON (guards against HTML error pages
+  // returned with 200 OK when the API endpoint doesn't exist or has changed).
+  async function safeJson(res, label) {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+      const preview = (await res.text()).slice(0, 150).replace(/\s+/g, ' ');
+      throw new Error(`Dover ${label} returned non-JSON (${ct || 'no content-type'}): ${preview}`);
+    }
+    return res.json();
+  }
+
   // Step 1 — resolve handle → UUID
   const slugRes = await fetch(
     `https://app.dover.com/api/v1/careers-page-slug/${handle}`,
     { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
   );
   if (!slugRes.ok) throw new Error(`Dover slug API failed for "${companyName}": ${slugRes.status}`);
-  const slugData = await slugRes.json();
+  const slugData = await safeJson(slugRes, 'slug API');
   const uuid = slugData.id;
-  if (!uuid) throw new Error(`Dover: no UUID returned for "${companyName}"`);
+  if (!uuid) throw new Error(`Dover: no UUID returned for "${companyName}" — response: ${JSON.stringify(slugData).slice(0, 100)}`);
 
   const apiRes = await fetch(
     `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
-    { headers: { 'Accept': 'application/json' } }
+    { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
   );
   if (!apiRes.ok) throw new Error(`Dover API failed for "${companyName}": ${apiRes.status}`);
-  const data = await apiRes.json();
+  const data = await safeJson(apiRes, 'job-groups API');
 
   const jobs = [];
   // Response is an array of job-groups; each has a .jobs array
