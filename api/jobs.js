@@ -503,9 +503,19 @@ async function fetchMicro1Jobs(companyName) {
   while (true) {
     const url = `${BASE}?page=${page}&limit=${LIMIT}&keyword=`;
     const res = await fetch(url, { headers: MICRO1_HEADERS });
-    if (!res.ok) throw new Error(`micro1 API failed (page ${page}): ${res.status}`);
 
-    const json = await res.json();
+    // Capture body text first so we can include it in error messages
+    const rawText = await res.text();
+    if (!res.ok) {
+      throw new Error(`micro1 API HTTP ${res.status} — ${rawText.slice(0, 300)}`);
+    }
+
+    let json;
+    try {
+      json = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error(`micro1 API: invalid JSON — ${rawText.slice(0, 300)}`);
+    }
 
     // API returns { data: { jobs: [...], total: N } } or similar — probe defensively
     const list = Array.isArray(json)            ? json
@@ -513,9 +523,19 @@ async function fetchMicro1Jobs(companyName) {
                : Array.isArray(json.jobs)       ? json.jobs
                : Array.isArray(json.data?.jobs) ? json.data.jobs
                : Array.isArray(json.data?.data) ? json.data.data
+               : Array.isArray(json.results)    ? json.results
+               : Array.isArray(json.items)      ? json.items
+               : Array.isArray(json.list)       ? json.list
                : [];
 
-    if (!list.length) break;
+    // If we got a 200 but couldn't find a list, surface the structure as an error
+    if (!list.length) {
+      const topKeys = typeof json === 'object' && json !== null ? Object.keys(json).join(', ') : typeof json;
+      const nestedKeys = (json?.data && typeof json.data === 'object')
+        ? 'data={' + Object.keys(json.data).join(', ') + '}'
+        : '';
+      throw new Error(`micro1 API: empty/unrecognised response. Keys: ${topKeys}${nestedKeys ? ' ' + nestedKeys : ''}. Preview: ${rawText.slice(0, 200)}`);
+    }
 
     for (const job of list) {
       const id  = job.id || job.uuid || job._id || '';
