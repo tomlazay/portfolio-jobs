@@ -317,86 +317,139 @@ async function fetchPolymerJobs(pageUrl, companyName) {
 }
 
 // ── Dover ─────────────────────────────────────────────────────
-// Dover exposes a clean REST API for careers pages.
-// Step 1: GET /api/v1/careers-page-slug/{handle}  → { "id": "<UUID>", ... }
-// Step 2: GET /api/v1/job-groups/{uuid}/job-groups → [{ jobs: [...] }]
+// Strategy 1 (API): GET /api/v1/careers-page-slug/{handle} → UUID,
+//   then GET /api/v1/job-groups/{uuid}/job-groups → jobs array.
+// Strategy 2 (HTML): if API returns HTML/fails, fetch the page and
+//   extract jobs from __NEXT_DATA__ (Dover uses Next.js).
 async function fetchDoverJobs(handle, companyName) {
   const pageUrl = `https://app.dover.com/jobs/${handle}`;
 
-  // Helper: parse JSON only if response is actually JSON (guards against HTML error pages
-  // returned with 200 OK when the API endpoint doesn't exist or has changed).
-  async function safeJson(res, label) {
-    const ct = res.headers.get('content-type') || '';
-    if (!ct.includes('json')) {
-      const preview = (await res.text()).slice(0, 150).replace(/\s+/g, ' ');
-      throw new Error(`Dover ${label} returned non-JSON (${ct || 'no content-type'}): ${preview}`);
-    }
-    return res.json();
+  // Map a raw Dover job object (from either API or __NEXT_DATA__) to our schema
+  function mapDoverJob(job, urlOverride) {
+    const loc = (job.locations || [])
+      .map(l => l.location_option?.display_name || l.display_name || '')
+      .filter(Boolean).join(', ');
+    return {
+      company:      companyName,
+      title:        (job.title || '').trim(),
+      department:   job.department || job.team || '',
+      location:     loc || job.location || '',
+      type:         'Full-time',
+      workMode:     job.is_remote ? 'Remote' : 'On-site',
+      compensation: '',
+      equity:       false,
+      url:          urlOverride || job.url || job.apply_url
+                    || (job.id ? `${pageUrl}/${job.id}` : pageUrl),
+    };
   }
 
-  // Dover's slug API is case-sensitive. The sheet URL may use a different casing
-  // (e.g. "allstacks") than Dover's actual slug (e.g. "Allstacks").
-  // Try the original handle first, then title-case fallback.
-  async function resolveSlug(rawHandle) {
+  // ── Strategy 1: REST API (careers-page-slug → job-groups) ───
+  // Dover's slug API is case-sensitive; try original then title-cased.
+  async function tryDoverApi() {
     const candidates = [
-      rawHandle,
-      rawHandle.charAt(0).toUpperCase() + rawHandle.slice(1),  // Title case
+      handle,
+      handle.charAt(0).toUpperCase() + handle.slice(1),
     ];
-    // Deduplicate (in case rawHandle is already title-cased)
     const unique = [...new Set(candidates)];
+
     for (const candidate of unique) {
-      const r = await fetch(
-        `https://app.dover.com/api/v1/careers-page-slug/${candidate}`,
-        { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
-      );
-      if (!r.ok) continue;
-      const ct = r.headers.get('content-type') || '';
-      if (!ct.includes('json')) continue;   // HTML response = wrong handle
-      const data = await r.json();
-      if (data.id) return { uuid: data.id, resolvedHandle: candidate };
+      try {
+        const slugRes = await fetch(
+          `https://app.dover.com/api/v1/careers-page-slug/${candidate}`,
+          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+        );
+        if (!slugRes.ok) continue;
+        const ct = slugRes.headers.get('content-type') || '';
+        if (!ct.includes('json')) continue;   // HTML error page
+        const slugData = await slugRes.json();
+        const uuid = slugData.id;
+        if (!uuid) continue;
+
+        const jobsRes = await fetch(
+          `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
+          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+        );
+        if (!jobsRes.ok) continue;
+        const jct = jobsRes.headers.get('content-type') || '';
+        if (!jct.includes('json')) continue;
+        const data = await jobsRes.json();
+
+        const jobs = [];
+        for (const group of (Array.isArray(data) ? data : [])) {
+          for (const job of (group.jobs || [])) {
+            if (!job.is_published || job.is_sample) continue;
+            jobs.push(mapDoverJob(job));
+          }
+        }
+        return jobs;   // success (may be empty if no open roles)
+      } catch (_) { /* try next candidate */ }
     }
-    throw new Error(
-      `Dover: could not resolve slug for "${companyName}" ` +
-      `(tried: ${unique.join(', ')}) — ` +
-      `company may have moved off Dover; update sheet URL to their current job board`
-    );
+    return null;   // all candidates failed
   }
 
-  // Step 1 — resolve handle → UUID (with case-insensitive fallback)
-  const { uuid } = await resolveSlug(handle);
+  // ── Strategy 2: HTML page (__NEXT_DATA__ + link scraping) ────
+  async function tryDoverHtml() {
+    const htmlRes = await fetch(pageUrl, { headers: SCRAPE_HEADERS });
+    if (!htmlRes.ok) throw new Error(`Dover HTML fetch failed for "${companyName}": HTTP ${htmlRes.status}`);
+    const html = await htmlRes.text();
 
-  const apiRes = await fetch(
-    `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
-    { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
-  );
-  if (!apiRes.ok) throw new Error(`Dover API failed for "${companyName}": ${apiRes.status}`);
-  const data = await safeJson(apiRes, 'job-groups API');
+    // 2a. __NEXT_DATA__ — present when Dover uses SSR (preferred)
+    const ndMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (ndMatch) {
+      try {
+        const nd = JSON.parse(ndMatch[1]);
+        const pp = nd?.props?.pageProps || {};
+        // Try multiple possible shapes Dover's pageProps may use
+        const rawJobs = Array.isArray(pp.jobs)       ? pp.jobs
+                      : Array.isArray(pp.jobPostings) ? pp.jobPostings
+                      : pp.careersPage?.job_groups?.flatMap(g => g.jobs || [])
+                     || pp.jobGroups?.flatMap(g => g.jobs || [])
+                     || [];
+        if (rawJobs.length > 0) {
+          return rawJobs
+            .filter(j => j.is_published !== false && !j.is_sample)
+            .map(job => mapDoverJob(job));
+        }
+      } catch (_) { /* fall through to link scraping */ }
+    }
 
-  const jobs = [];
-  // Response is an array of job-groups; each has a .jobs array
-  for (const group of (Array.isArray(data) ? data : [])) {
-    for (const job of (group.jobs || [])) {
-      if (!job.is_published || job.is_sample) continue;
-
-      const loc = (job.locations || [])
-        .map(l => l.location_option?.display_name || '')
-        .filter(Boolean)
-        .join(', ');
-
+    // 2b. Link scraping — Dover job links: /{handle}/careers/{uuid}
+    // e.g. href="/allstacks/careers/1977474b-7ac4-4a9d-a56b-7eac98558a24"
+    const jobs = [];
+    const linkRe = new RegExp(
+      `href="((?:https://app\\.dover\\.com)?/${handle}/careers/([\\w-]+))"[^>]*>([\\s\\S]*?)</a>`, 'gi'
+    );
+    let m;
+    while ((m = linkRe.exec(html)) !== null) {
+      const href  = m[1].startsWith('http') ? m[1] : `https://app.dover.com${m[1]}`;
+      const label = m[3].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!label || label.length < 3) continue;
       jobs.push({
         company:      companyName,
-        title:        (job.title || '').trim(),
+        title:        label,
         department:   '',
-        location:     loc,
+        location:     '',
         type:         'Full-time',
         workMode:     'On-site',
         compensation: '',
         equity:       false,
-        url:          `${pageUrl}/${job.id}`,
+        url:          href,
       });
     }
+    if (jobs.length > 0) return jobs;
+
+    throw new Error(
+      `Dover: no jobs found for "${companyName}" via HTML scraping. ` +
+      `__NEXT_DATA__ present: ${!!ndMatch}. ` +
+      `HTML preview: ${html.slice(0, 300)}`
+    );
   }
-  return jobs;
+
+  // Try API first; fall back to HTML scraping
+  const apiResult = await tryDoverApi();
+  if (apiResult !== null) return apiResult;
+
+  return await tryDoverHtml();
 }
 
 // ── Teamtailor ────────────────────────────────────────────────
