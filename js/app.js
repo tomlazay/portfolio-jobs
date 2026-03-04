@@ -64,41 +64,83 @@ const COMPANY_CONFIG = {
 // ── App state ─────────────────────────────────────────────────
 let ALL_JOBS = [];
 
+// ── Client-side job cache (localStorage) ─────────────────────
+// Renders cached jobs instantly, then refreshes in the background.
+// TTL: 5 minutes. Cache is keyed so a new deploy busts it automatically.
+const CACHE_KEY = 'companyon_jobs_v1';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in ms
+
+function cacheLoad() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { data, savedAt } = JSON.parse(raw);
+    if (Date.now() - savedAt > CACHE_TTL) return null; // expired
+    return data;
+  } catch (_) { return null; }
+}
+
+function cacheSave(data) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ data, savedAt: Date.now() })); }
+  catch (_) { /* storage full or private-browsing — silently skip */ }
+}
+
+function applyJobData(data) {
+  ALL_JOBS = normalizeJobs(data.jobs || []);
+
+  const companyCount = document.getElementById('company-count');
+  const totalCount   = document.getElementById('total-count');
+  if (companyCount) companyCount.textContent = new Set(ALL_JOBS.map(j => j.company)).size;
+  if (totalCount)   totalCount.textContent   = ALL_JOBS.length;
+
+  const lastUpdatedEl = document.getElementById('last-updated');
+  if (lastUpdatedEl && data.fetchedAt) {
+    const d = new Date(data.fetchedAt);
+    lastUpdatedEl.textContent = d.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+    });
+  }
+}
+
 // ── Fetch jobs from serverless API ───────────────────────────
 async function fetchJobs() {
-  showLoading(true);
+  // Show cached data immediately (no spinner) if we have a fresh copy.
+  const cached = cacheLoad();
+  if (cached) {
+    applyJobData(cached);
+    applyUrlParams();
+    update();
+    showLoading(false);
+    // Refresh in the background so the next load is also fast.
+    fetchJobs.background = true;
+  } else {
+    showLoading(true);
+  }
+
   try {
     const res = await fetch('/api/jobs');
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
 
-    ALL_JOBS = normalizeJobs(data.jobs || []);
+    cacheSave(data);
+    applyJobData(data);
 
-    // Update hero stats
-    const companyCount = document.getElementById('company-count');
-    const totalCount   = document.getElementById('total-count');
-    if (companyCount) companyCount.textContent = new Set(ALL_JOBS.map(j => j.company)).size;
-    if (totalCount)   totalCount.textContent   = ALL_JOBS.length;
-
-    // Populate footer "Last Updated" timestamp
-    const lastUpdatedEl = document.getElementById('last-updated');
-    if (lastUpdatedEl && data.fetchedAt) {
-      const d = new Date(data.fetchedAt);
-      lastUpdatedEl.textContent = d.toLocaleString('en-US', {
-        month: 'short', day: 'numeric', year: 'numeric',
-        hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-      });
+    if (!fetchJobs.background) {
+      // First (cold) load — apply URL params and render now.
+      applyUrlParams();
     }
-
-    // Apply any URL params (shareable links) before first render
-    applyUrlParams();
-
-    // update() will call updateFilters() which populates all dropdowns,
-    // then render the matching jobs.
+    // Re-render with fresh data (also handles the background-refresh case).
     update();
   } catch (err) {
+    if (!fetchJobs.background) {
+      showLoading(false);
+      showError(err.message);
+    }
+    // Background refresh failure: silently ignore — stale data is still shown.
+  } finally {
     showLoading(false);
-    showError(err.message);
+    fetchJobs.background = false;
   }
 }
 

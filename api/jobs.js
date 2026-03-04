@@ -900,59 +900,65 @@ export default async function handler(req) {
 
   try {
     const companies = await fetchCompanies();
-    const allJobs   = [];
-    const errors    = [];
 
-    for (const company of companies) {
-      const url = company.url;   // declared outside try so catch block can reference it
-      try {
+    // Fetch all companies IN PARALLEL — dramatically faster than the old
+    // sequential for-await loop (total time ≈ slowest single fetch, not sum).
+    async function fetchOneCompany(company) {
+      const url = company.url;
 
-        if (/jobs\.ashbyhq\.com\/([^/?#\s]+)/.test(url)) {
-          const handle = url.match(/jobs\.ashbyhq\.com\/([^/?#\s]+)/)[1];
-          allJobs.push(...await fetchAshbyJobs(handle, company.name));
+      if (/jobs\.ashbyhq\.com\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/jobs\.ashbyhq\.com\/([^/?#\s]+)/)[1];
+        return fetchAshbyJobs(handle, company.name);
 
-        } else if (/jobs\.lever\.co\/([^/?#\s]+)/.test(url)) {
-          const handle = url.match(/jobs\.lever\.co\/([^/?#\s]+)/)[1];
-          allJobs.push(...await fetchLeverJobs(handle, company.name));
+      } else if (/jobs\.lever\.co\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/jobs\.lever\.co\/([^/?#\s]+)/)[1];
+        return fetchLeverJobs(handle, company.name);
 
-        } else if (/jobs\.polymer\.co\//.test(url)) {
-          allJobs.push(...await fetchPolymerJobs(url, company.name));
+      } else if (/jobs\.polymer\.co\//.test(url)) {
+        return fetchPolymerJobs(url, company.name);
 
-        } else if (/app\.dover\.com\/jobs\/([^/?#\s]+)/.test(url)) {
-          const handle = url.match(/app\.dover\.com\/jobs\/([^/?#\s]+)/)[1];
-          allJobs.push(...await fetchDoverJobs(handle, company.name));
+      } else if (/app\.dover\.com\/jobs\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/app\.dover\.com\/jobs\/([^/?#\s]+)/)[1];
+        return fetchDoverJobs(handle, company.name);
 
-        } else if (/teamtailor\.com/.test(url)) {
-          allJobs.push(...await fetchTeamtailorJobs(url, company.name));
+      } else if (/teamtailor\.com/.test(url)) {
+        return fetchTeamtailorJobs(url, company.name);
 
-        } else if (/[a-z0-9-]+\.breezy\.hr/.test(url)) {
-          const handle = url.match(/([a-z0-9-]+)\.breezy\.hr/)[1];
-          allJobs.push(...await fetchBreezyJobs(handle, company.name));
+      } else if (/[a-z0-9-]+\.breezy\.hr/.test(url)) {
+        const handle = url.match(/([a-z0-9-]+)\.breezy\.hr/)[1];
+        return fetchBreezyJobs(handle, company.name);
 
-        } else if (/ats\.rippling\.com/.test(url)) {
-          // Extract board slug — strip any leading locale segment (e.g. "en-GB")
-          // URL shapes:
-          //   ats.rippling.com/en-GB/{board-slug}/jobs  → slug is segment after locale
-          //   ats.rippling.com/{board-slug}/jobs        → slug is first segment
-          const parts = url.replace(/^https?:\/\/ats\.rippling\.com\//, '').split('/');
-          // If the first segment looks like a locale (xx-XX or xx), skip it
-          const slug = /^[a-z]{2}(-[A-Z]{2})?$/.test(parts[0]) ? parts[1] : parts[0];
-          if (slug) {
-            allJobs.push(...await fetchRipplingJobs(slug, company.name));
-          }
+      } else if (/ats\.rippling\.com/.test(url)) {
+        // Extract board slug — strip any leading locale segment (e.g. "en-GB")
+        // URL shapes:
+        //   ats.rippling.com/en-GB/{board-slug}/jobs  → slug is segment after locale
+        //   ats.rippling.com/{board-slug}/jobs        → slug is first segment
+        const parts = url.replace(/^https?:\/\/ats\.rippling\.com\//, '').split('/');
+        const slug = /^[a-z]{2}(-[A-Z]{2})?$/.test(parts[0]) ? parts[1] : parts[0];
+        return slug ? fetchRipplingJobs(slug, company.name) : Promise.resolve([]);
 
-        } else if (/micro1\.ai/.test(url)) {
-          allJobs.push(...await fetchMicro1Jobs(company.name));
+      } else if (/micro1\.ai/.test(url)) {
+        return fetchMicro1Jobs(company.name);
 
-        } else {
-          // Generic custom page scraper (/open-roles/, /about/careers/, /careers/)
-          allJobs.push(...await fetchCustomJobs(url, company.name));
-        }
-      } catch (err) {
-        console.error(`Error fetching ${company.name} (${url}):`, err.message);
-        errors.push({ company: company.name, url, error: err.message });
+      } else {
+        // Generic custom page scraper (/open-roles/, /about/careers/, /careers/)
+        return fetchCustomJobs(url, company.name);
       }
     }
+
+    const results = await Promise.allSettled(companies.map(fetchOneCompany));
+
+    const allJobs = [];
+    const errors  = [];
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        allJobs.push(...result.value);
+      } else {
+        const { name, url } = companies[i];
+        console.error(`Error fetching ${name} (${url}):`, result.reason?.message);
+        errors.push({ company: name, url, error: result.reason?.message || String(result.reason) });
+      }
+    });
 
     return new Response(
       JSON.stringify({
