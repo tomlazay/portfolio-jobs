@@ -491,11 +491,18 @@ async function fetchMicro1Jobs(companyName) {
   const allJobs = [];
   let page = 1;
 
+  // API requires Origin/Referer headers matching the Webflow frontend
+  // — without them the server returns 404.
+  const MICRO1_HEADERS = {
+    ...SCRAPE_HEADERS,
+    'Accept':  'application/json',
+    'Origin':  'https://www.micro1.ai',
+    'Referer': 'https://www.micro1.ai/',
+  };
+
   while (true) {
     const url = `${BASE}?page=${page}&limit=${LIMIT}&keyword=`;
-    const res = await fetch(url, {
-      headers: { ...SCRAPE_HEADERS, 'Accept': 'application/json' },
-    });
+    const res = await fetch(url, { headers: MICRO1_HEADERS });
     if (!res.ok) throw new Error(`micro1 API failed (page ${page}): ${res.status}`);
 
     const json = await res.json();
