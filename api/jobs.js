@@ -122,62 +122,61 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   const baseUrl     = pageUrl.split('#')[0].split('?')[0];
   const inputSlug   = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
 
-  // Helper: try the Polymer public REST API for a given slug (paginated)
-  // Returns: array of mapped jobs (may be empty), or null if HTTP error
+  // Helper: try the Polymer public REST API for a given slug (paginated).
+  // Returns { jobs: [...], rawSample } on success, or null on HTTP error.
   async function tryPolymerApi(slug) {
-    const PER_PAGE = 50;
-    const apiJobs  = [];
-    let   apiPage  = 1;
-    let   rawSample = null;   // keep first page raw data for diagnostics
+    const PER_PAGE  = 50;
+    const apiJobs   = [];
+    let   apiPage   = 1;
+    let   rawSample = null;   // first-page raw data for diagnostics
+    // Denylist approach: exclude clearly inactive statuses; include everything else.
+    // An allowlist would silently drop jobs if Polymer uses an unexpected status value.
+    const INACTIVE = new Set(['draft', 'archived', 'closed', 'expired', 'deleted', 'inactive', 'removed', 'filled']);
     while (true) {
       const apiUrl = `https://api.polymer.co/v1/hire/organizations/${slug}/jobs`
                    + `?page=${apiPage}&per_page=${PER_PAGE}`;
       const apiRes = await fetch(apiUrl, {
         headers: { 'Accept': 'application/json', 'User-Agent': SCRAPE_HEADERS['User-Agent'] },
       });
-      if (!apiRes.ok) return null;   // signal failure to caller
+      if (!apiRes.ok) return null;   // signal HTTP failure to caller
 
       const apiData = await apiRes.json();
-      if (apiPage === 1) rawSample = apiData;   // save for diagnostics
+      if (apiPage === 1) rawSample = apiData;
       const page = Array.isArray(apiData)       ? apiData
                  : Array.isArray(apiData.jobs)  ? apiData.jobs
                  : Array.isArray(apiData.data)  ? apiData.data
                  : [];
 
-      // Exclude clearly inactive/closed jobs; include everything else
-      // (using a denylist so unknown status values don't silently drop jobs)
-      const INACTIVE = new Set(['draft', 'archived', 'closed', 'expired', 'deleted', 'inactive', 'removed', 'filled']);
-      const active = page.filter(j => {
-        const s = (j.status || '').toLowerCase();
-        return !INACTIVE.has(s);
-      });
-
-      // mapJob needs the slug for fallback URLs — capture it in closure
-      apiJobs.push(...active.map(job => ({
-        company:      companyName,
-        title:        job.title || job.name || '',
-        department:   job.department || job.category || job.team || '',
-        location:     job.location   || job.city     || '',
-        type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
-        workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
-        compensation: job.salary || job.compensation || '',
-        equity:       false,
-        url:          job.url || job.apply_url || job.applyUrl
-                      || (job.id ? `https://jobs.polymer.co/${slug}/${job.id}` : ''),
-      })));
+      apiJobs.push(...page
+        .filter(j => !INACTIVE.has((j.status || '').toLowerCase()))
+        .map(job => ({
+          company:      companyName,
+          title:        job.title || job.name || '',
+          department:   job.department || job.category || job.team || '',
+          location:     job.location   || job.city     || '',
+          type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
+          workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
+          compensation: job.salary || job.compensation || '',
+          equity:       false,
+          url:          job.url || job.apply_url || job.applyUrl
+                        || (job.id ? `https://jobs.polymer.co/${slug}/${job.id}` : ''),
+        }))
+      );
 
       if (page.length < PER_PAGE) break;
       apiPage++;
     }
-    return apiJobs;   // may be empty array if org exists but has no active jobs
+    return { jobs: apiJobs, rawSample };
   }
 
   // ── Strategy 1a: API with the slug from the Google Sheet ────
-  let apiRawSample = null;
+  let apiDiag = null;   // raw API response for diagnostics if all strategies fail
   try {
     const result = await tryPolymerApi(inputSlug);
-    if (result && result.length > 0) return result;
-    apiRawSample = rawSample;   // capture for diagnostics if we fall through
+    if (result) {
+      apiDiag = result.rawSample;
+      if (result.jobs.length > 0) return result.jobs;
+    }
   } catch (_) { /* fall through */ }
 
   // ── Strategies 2 & 3 require the HTML page ──────────────────
@@ -206,7 +205,10 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   if (resolvedSlug !== inputSlug) {
     try {
       const result = await tryPolymerApi(resolvedSlug);
-      if (result && result.length > 0) return result;
+      if (result) {
+        if (!apiDiag) apiDiag = result.rawSample;
+        if (result.jobs.length > 0) return result.jobs;
+      }
     } catch (_) { /* fall through */ }
   }
 
@@ -274,21 +276,15 @@ async function fetchPolymerJobs(pageUrl, companyName) {
 
   if (jobs.length === 0 && html.length > 0) {
     const hasNextData = html.includes('__NEXT_DATA__');
-    // Include raw API sample in the error to help diagnose format mismatches
-    const apiSample = (() => {
-      try {
-        const r = jobs._rawSample || null;
-        if (!r) return '(API returned null/error)';
-        const s = JSON.stringify(r);
-        return s.length > 300 ? s.slice(0, 300) + '…' : s;
-      } catch (_) { return '(serialize error)'; }
-    })();
+    const apiSample = apiDiag
+      ? JSON.stringify(apiDiag).slice(0, 300)
+      : '(API returned HTTP error or threw)';
     throw new Error(
       `Polymer: no jobs found for "${companyName}". ` +
       `Input slug: ${inputSlug}, resolved slug: ${resolvedSlug}. ` +
       `__NEXT_DATA__ present: ${hasNextData}. ` +
-      `API sample: ${apiSample}. ` +
-      `HTML preview: ${html.slice(0, 200)}`
+      `API raw sample: ${apiSample}. ` +
+      `HTML preview: ${html.slice(0, 300)}`
     );
   }
 
