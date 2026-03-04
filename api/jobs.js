@@ -580,35 +580,34 @@ async function fetchMicro1Jobs(companyName) {
     }
 
     for (const job of list) {
-      const id  = job.id || job.uuid || job._id || '';
-      const jobUrl = job.url || job.apply_url || job.applyUrl
+      // micro1 API field names: job_id, job_name, apply_url, engagement_type, location_type
+      const id     = job.job_id || job.id || job.uuid || job._id || '';
+      const jobUrl = job.apply_url || job.url || job.applyUrl
                    || (id ? `https://jobs.micro1.ai/post/${id}` : '');
       if (!jobUrl) continue;
 
-      const title = job.title || job.name || job.job_title || '';
+      const title = job.job_name || job.title || job.name || job.job_title || '';
       if (!title) continue;
 
-      const isRemote = job.remote === true || job.is_remote === true
-                     || (job.work_type || '').toLowerCase().includes('remote')
-                     || (job.location  || '').toLowerCase().includes('remote');
+      const locType  = (job.location_type || job.work_type || job.work_mode || '').toLowerCase();
+      const isRemote = locType.includes('remote') || job.remote === true || job.is_remote === true;
+
+      const rawType = job.engagement_type || job.employment_type || job.job_type || job.type || 'Full-time';
+      const jobType = rawType.charAt(0).toUpperCase() + rawType.slice(1);
 
       allJobs.push({
         company:      companyName,
         title,
         department:   job.department || job.category || job.team || '',
         location:     job.location   || job.city     || '',
-        type:         job.employment_type || job.job_type || job.type || 'Full-time',
-        workMode:     isRemote ? 'Remote' : (job.work_type || job.work_mode || 'On-site'),
-        compensation: job.salary || job.compensation || '',
+        type:         jobType,
+        workMode:     isRemote ? 'Remote' : 'On-site',
+        compensation: job.ideal_yearly_compensation
+                        ? `$${Math.round(job.ideal_yearly_compensation / 1000)}K`
+                        : (job.salary || job.compensation || ''),
         equity:       false,
         url:          jobUrl,
       });
-    }
-
-    // If we found a list but every job was filtered out, surface a sample so we can fix field names
-    if (page === 1 && allJobs.length === 0 && list.length > 0) {
-      const sample = list[0];
-      throw new Error(`micro1: ${list.length} jobs found but none had valid url+title. Sample keys: [${Object.keys(sample).join(', ')}]. Sample: ${JSON.stringify(sample).slice(0, 400)}`);
     }
 
     // Stop if we've received fewer items than the page limit (last page)
