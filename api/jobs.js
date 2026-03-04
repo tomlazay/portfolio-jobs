@@ -947,6 +947,20 @@ async function fetchMicro1Jobs(companyName) {
         jobType = 'Full-time';
       }
 
+      // ideal_yearly_compensation is now an object {min, max} in whole dollars.
+      // e.g. {min: 140000, max: 280000} → "$140K – $280K"
+      const comp = job.ideal_yearly_compensation;
+      let rawComp = job.salary || job.compensation || '';
+      if (!rawComp && comp && typeof comp === 'object') {
+        const lo = comp.min != null ? Math.round(Number(comp.min) / 1000) : null;
+        const hi = comp.max != null ? Math.round(Number(comp.max) / 1000) : null;
+        if (lo && hi) rawComp = `$${lo}K – $${hi}K`;
+        else if (hi)  rawComp = `$${hi}K`;
+        else if (lo)  rawComp = `$${lo}K`;
+      } else if (!rawComp && typeof comp === 'string') {
+        rawComp = comp.replace(/\/yr\b/i, '').trim();
+      }
+
       allJobs.push({
         company:      companyName,
         title,
@@ -954,19 +968,6 @@ async function fetchMicro1Jobs(companyName) {
         location:     job.location   || job.city     || '',
         type:         jobType,
         workMode:     isRemote ? 'Remote' : 'On-site',
-        // ideal_yearly_compensation is now an object {min, max} in whole dollars.
-        // e.g. {min: 140000, max: 280000} → "$140K – $280K"
-        const comp = job.ideal_yearly_compensation;
-        let rawComp = job.salary || job.compensation || '';
-        if (!rawComp && comp && typeof comp === 'object') {
-          const lo = comp.min != null ? Math.round(Number(comp.min) / 1000) : null;
-          const hi = comp.max != null ? Math.round(Number(comp.max) / 1000) : null;
-          if (lo && hi) rawComp = `${lo}K – ${hi}K`;
-          else if (hi)  rawComp = `${hi}K`;
-          else if (lo)  rawComp = `${lo}K`;
-        } else if (!rawComp && typeof comp === 'string') {
-          rawComp = comp.replace(/\/yr\b/i, '').trim();
-        }
         compensation: formatSalary(rawComp),
         equity:       false,
         url:          jobUrl,
