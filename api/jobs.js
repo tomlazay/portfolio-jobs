@@ -569,6 +569,12 @@ async function fetchMicro1Jobs(companyName) {
       });
     }
 
+    // If we found a list but every job was filtered out, surface a sample so we can fix field names
+    if (page === 1 && allJobs.length === 0 && list.length > 0) {
+      const sample = list[0];
+      throw new Error(`micro1: ${list.length} jobs found but none had valid url+title. Sample keys: [${Object.keys(sample).join(', ')}]. Sample: ${JSON.stringify(sample).slice(0, 400)}`);
+    }
+
     // Stop if we've received fewer items than the page limit (last page)
     const total = json.total || json.data?.total || json.meta?.total || Infinity;
     if (list.length < LIMIT || allJobs.length >= total) break;
