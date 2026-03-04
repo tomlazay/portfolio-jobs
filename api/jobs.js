@@ -482,109 +482,67 @@ async function fetchCustomJobs(pageUrl, companyName) {
 }
 
 // ── micro1.ai ─────────────────────────────────────────────────
-// micro1 runs a Next.js app at www.micro1.ai/jobs.
-// Jobs are loaded client-side so the raw HTML has no <a> links —
-// they're embedded in __NEXT_DATA__ or fetched from a public API.
-// Individual posting pages live at: jobs.micro1.ai/post/{UUID}
+// micro1 is a Webflow SPA — jobs are loaded client-side from:
+//   https://prod-api.micro1.ai/api/v1/job/portal?page=N&limit=18&keyword=
+// Individual posting pages: https://jobs.micro1.ai/post/{UUID}
 async function fetchMicro1Jobs(companyName) {
-  const res = await fetch('https://www.micro1.ai/jobs', { headers: SCRAPE_HEADERS });
-  if (!res.ok) throw new Error(`micro1 fetch failed: ${res.status}`);
-  const html = await res.text();
+  const BASE = 'https://prod-api.micro1.ai/api/v1/job/portal';
+  const LIMIT = 18;
+  const allJobs = [];
+  let page = 1;
 
-  // ── Strategy 1: __NEXT_DATA__ embedded JSON (SSR/SSG) ─────────
-  const ndMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-  if (ndMatch) {
-    try {
-      const nd = JSON.parse(ndMatch[1]);
-      // Try common Next.js pageProps shapes micro1 might use
-      const candidates = [
-        nd?.props?.pageProps?.jobs,
-        nd?.props?.pageProps?.data?.jobs,
-        nd?.props?.pageProps?.jobListings,
-        nd?.props?.pageProps?.openRoles,
-        nd?.props?.pageProps?.jobPosts,
-      ].filter(Array.isArray);
-
-      for (const list of candidates) {
-        if (!list.length) continue;
-        const mapped = list.map(job => ({
-          company:      companyName,
-          title:        job.title || job.name || job.job_title || '',
-          department:   job.department || job.category || job.team || '',
-          location:     job.location || job.city || '',
-          type:         job.employment_type || job.type || 'Full-time',
-          workMode:     (job.remote || job.work_mode === 'remote') ? 'Remote' : (job.work_mode || 'On-site'),
-          compensation: job.salary || '',
-          equity:       false,
-          url:          job.url || job.apply_url || (job.id ? `https://jobs.micro1.ai/post/${job.id}` : job.uuid ? `https://jobs.micro1.ai/post/${job.uuid}` : ''),
-        })).filter(j => j.title && j.url);
-        if (mapped.length) return mapped;
-      }
-    } catch { /* fall through to next strategy */ }
-  }
-
-  // ── Strategy 2: public JSON API ───────────────────────────────
-  // micro1 exposes a public API; try the most likely list endpoint.
-  const apiUrls = [
-    'https://www.micro1.ai/api/jobs',
-    'https://www.micro1.ai/api/public/jobs',
-    'https://public.api.micro1.ai/job/list',
-  ];
-  for (const apiUrl of apiUrls) {
-    try {
-      const apiRes = await fetch(apiUrl, {
-        headers: { ...SCRAPE_HEADERS, 'Accept': 'application/json' },
-      });
-      if (!apiRes.ok) continue;
-      const ct = apiRes.headers.get('content-type') || '';
-      if (!ct.includes('json')) continue;
-      const json = await apiRes.json();
-      // Support { jobs: [...] }, { data: [...] }, or a bare array
-      const list = Array.isArray(json) ? json
-                 : Array.isArray(json.jobs) ? json.jobs
-                 : Array.isArray(json.data) ? json.data : [];
-      if (!list.length) continue;
-      return list.map(job => ({
-        company:      companyName,
-        title:        job.title || job.name || job.job_title || '',
-        department:   job.department || job.category || job.team || '',
-        location:     job.location || job.city || '',
-        type:         job.employment_type || job.type || 'Full-time',
-        workMode:     (job.remote || job.work_mode === 'remote') ? 'Remote' : (job.work_mode || 'On-site'),
-        compensation: job.salary || '',
-        equity:       false,
-        url:          job.url || job.apply_url || (job.id ? `https://jobs.micro1.ai/post/${job.id}` : job.uuid ? `https://jobs.micro1.ai/post/${job.uuid}` : ''),
-      })).filter(j => j.title && j.url);
-    } catch { /* try next URL */ }
-  }
-
-  // ── Strategy 3: scrape jobs.micro1.ai/post/ links from HTML ───
-  // Fallback in case any links are statically rendered.
-  const jobs = [];
-  const linkRegex = /href="(https?:\/\/jobs\.micro1\.ai\/post\/[^"#?\s]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  const seen = new Set();
-  let match;
-  while ((match = linkRegex.exec(html)) !== null) {
-    const href = match[1];
-    if (seen.has(href)) continue;
-    seen.add(href);
-    const rawText = match[2]
-      .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!rawText || rawText.length < 2) continue;
-    const parts = rawText.split(/\s{2,}|\n/).map(s => s.trim()).filter(Boolean);
-    jobs.push({
-      company:      companyName,
-      title:        parts[0] || rawText,
-      department:   parts[1] || '',
-      location:     parts[2] || '',
-      type:         'Full-time',
-      workMode:     'Remote',
-      compensation: '',
-      equity:       false,
-      url:          href,
+  while (true) {
+    const url = `${BASE}?page=${page}&limit=${LIMIT}&keyword=`;
+    const res = await fetch(url, {
+      headers: { ...SCRAPE_HEADERS, 'Accept': 'application/json' },
     });
+    if (!res.ok) throw new Error(`micro1 API failed (page ${page}): ${res.status}`);
+
+    const json = await res.json();
+
+    // API returns { data: { jobs: [...], total: N } } or similar — probe defensively
+    const list = Array.isArray(json)            ? json
+               : Array.isArray(json.data)       ? json.data
+               : Array.isArray(json.jobs)       ? json.jobs
+               : Array.isArray(json.data?.jobs) ? json.data.jobs
+               : Array.isArray(json.data?.data) ? json.data.data
+               : [];
+
+    if (!list.length) break;
+
+    for (const job of list) {
+      const id  = job.id || job.uuid || job._id || '';
+      const jobUrl = job.url || job.apply_url || job.applyUrl
+                   || (id ? `https://jobs.micro1.ai/post/${id}` : '');
+      if (!jobUrl) continue;
+
+      const title = job.title || job.name || job.job_title || '';
+      if (!title) continue;
+
+      const isRemote = job.remote === true || job.is_remote === true
+                     || (job.work_type || '').toLowerCase().includes('remote')
+                     || (job.location  || '').toLowerCase().includes('remote');
+
+      allJobs.push({
+        company:      companyName,
+        title,
+        department:   job.department || job.category || job.team || '',
+        location:     job.location   || job.city     || '',
+        type:         job.employment_type || job.job_type || job.type || 'Full-time',
+        workMode:     isRemote ? 'Remote' : (job.work_type || job.work_mode || 'On-site'),
+        compensation: job.salary || job.compensation || '',
+        equity:       false,
+        url:          jobUrl,
+      });
+    }
+
+    // Stop if we've received fewer items than the page limit (last page)
+    const total = json.total || json.data?.total || json.meta?.total || Infinity;
+    if (list.length < LIMIT || allJobs.length >= total) break;
+    page++;
   }
-  return jobs;
+
+  return allJobs;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
