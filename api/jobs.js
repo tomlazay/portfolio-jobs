@@ -15,7 +15,7 @@
 //   - Custom     (any other URL — scrapes /open-roles/ or /about/careers/
 //                 links; auto-detects embedded Rippling or Breezy widgets)
 //
-//  Cached 15 min via Vercel CDN (s-maxage header).
+//  Cached 24 hrs via Vercel CDN (s-maxage header).
 // ============================================================
 
 const SHEET_CSV_URL =
@@ -491,7 +491,7 @@ function formatSalary(raw) {
 // ── Main handler ─────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=3600');
+  res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=86400');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
