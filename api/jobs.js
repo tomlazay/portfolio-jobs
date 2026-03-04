@@ -110,76 +110,103 @@ async function fetchLeverJobs(handle, companyName) {
 }
 
 // ── Polymer ───────────────────────────────────────────────────
+// Polymer job boards are Next.js apps at jobs.polymer.co/{slug}.
+// Strategy (tried in order):
+//   1. Public REST API  — api.polymer.co/v1/hire/organizations/{slug}/jobs
+//   2. __NEXT_DATA__    — JSON embedded in the page <script> tag (most reliable)
+//   3. Link scraping    — parse <a href="/{slug}/{id}"> from HTML as last resort
 async function fetchPolymerJobs(pageUrl, companyName) {
   const baseUrl     = pageUrl.split('#')[0].split('?')[0];
   const companySlug = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
 
-  // Try the public Polymer REST API first (avoids HTML scrape 403s)
-  try {
-    const apiRes = await fetch(
-      `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`,
-      { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
-    );
-    if (apiRes.ok) {
-      const apiData = await apiRes.json();
-      const apiList = Array.isArray(apiData) ? apiData
-                    : Array.isArray(apiData.jobs) ? apiData.jobs
-                    : Array.isArray(apiData.data) ? apiData.data
-                    : [];
-      if (apiList.length > 0) {
-        return apiList.map(job => ({
-          company:      companyName,
-          title:        job.title || job.name || '',
-          department:   job.department || job.category || '',
-          location:     job.location || job.city || '',
-          type:         job.employment_type || job.type || 'Full-time',
-          workMode:     job.remote ? 'Remote' : (job.work_mode || 'On-site'),
-          compensation: job.salary || '',
-          equity:       false,
-          url:          job.url || job.apply_url || `https://jobs.polymer.co/${companySlug}/${job.id}`,
-        }));
+  // Helper: map a raw Polymer API/Next job object → our schema
+  const mapJob = job => ({
+    company:      companyName,
+    title:        job.title || job.name || '',
+    department:   job.department || job.category || job.team || '',
+    location:     job.location   || job.city     || '',
+    type:         job.employment_type || job.employmentType || job.type || 'Full-time',
+    workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
+    compensation: job.salary || job.compensation || '',
+    equity:       false,
+    url:          job.url || job.apply_url || job.applyUrl
+                  || (job.id ? `https://jobs.polymer.co/${companySlug}/${job.id}` : ''),
+  });
+
+  // ── Strategy 1: Public REST API ─────────────────────────────
+  const apiAttempts = [
+    `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`,
+    `https://api.polymer.co/v2/hire/organizations/${companySlug}/jobs`,
+  ];
+  for (const apiUrl of apiAttempts) {
+    try {
+      const apiRes = await fetch(apiUrl, {
+        headers: { 'Accept': 'application/json', 'User-Agent': SCRAPE_HEADERS['User-Agent'] },
+      });
+      if (apiRes.ok) {
+        const apiData = await apiRes.json();
+        const apiList = Array.isArray(apiData)       ? apiData
+                      : Array.isArray(apiData.jobs)  ? apiData.jobs
+                      : Array.isArray(apiData.data)  ? apiData.data
+                      : [];
+        if (apiList.length > 0) return apiList.map(mapJob);
       }
-    }
-  } catch (_) { /* fall through to HTML scrape */ }
+    } catch (_) { /* try next */ }
+  }
 
-  // Fallback: scrape the HTML job board page with browser-like headers
-  const scrapeHeaders = {
-    ...SCRAPE_HEADERS,
-    'Referer':           'https://jobs.polymer.co/',
-    'sec-fetch-site':    'same-origin',
-    'sec-fetch-mode':    'navigate',
-    'sec-fetch-dest':    'document',
-  };
-  const res = await fetch(baseUrl, { headers: scrapeHeaders });
-  if (!res.ok) throw new Error(`Polymer fetch failed for "${companyName}" (${baseUrl}): ${res.status}`);
-  const html = await res.text();
+  // ── Strategy 2 & 3: fetch HTML, then try __NEXT_DATA__ then link-scrape ──
+  // Use minimal headers — the suspicious Sec-Fetch headers can trigger bot detection.
+  const htmlRes = await fetch(baseUrl, {
+    headers: {
+      'User-Agent':      SCRAPE_HEADERS['User-Agent'],
+      'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+  if (!htmlRes.ok) {
+    throw new Error(
+      `Polymer: HTML fetch failed for "${companyName}" (${baseUrl}): HTTP ${htmlRes.status}`
+    );
+  }
+  const html = await htmlRes.text();
 
+  // ── Strategy 2: __NEXT_DATA__ (Next.js embeds all page props as JSON) ──
+  const ndMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (ndMatch) {
+    try {
+      const nd   = JSON.parse(ndMatch[1]);
+      const pp   = nd?.props?.pageProps || {};
+      // Polymer stores jobs under pageProps.jobs or pageProps.organization.jobs
+      const list = Array.isArray(pp.jobs)                  ? pp.jobs
+                 : Array.isArray(pp.organization?.jobs)    ? pp.organization.jobs
+                 : Array.isArray(pp.data?.jobs)            ? pp.data.jobs
+                 : Array.isArray(pp.initialJobs)           ? pp.initialJobs
+                 : [];
+      if (list.length > 0) return list.map(mapJob);
+    } catch (_) { /* fall through to link scraping */ }
+  }
+
+  // ── Strategy 3: link scraping ───────────────────────────────
+  // Polymer job links: href="/{slug}/{id}" or href="https://jobs.polymer.co/{slug}/{id}"
   const jobs = [];
-  // Polymer job links: href="/company/numeric-id" OR href="https://jobs.polymer.co/company/numeric-id"
   const linkRegex = new RegExp(
-    `href="((?:https://jobs\\.polymer\\.co)?/${companySlug}/\\d+)"[^>]*>([\\s\\S]*?)<\\/a>`, 'gi'
+    `href="((?:https://jobs\\.polymer\\.co)?/${companySlug}/[\\w-]+)"[^>]*>([\\s\\S]*?)<\\/a>`, 'gi'
   );
   let match;
   while ((match = linkRegex.exec(html)) !== null) {
     const href    = match[1];
     const rawText = match[2]
       .replace(/<[^>]+>/g, '\n')
-      .replace(/&amp;/g, '&')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/View job/gi, '')
-      .replace(/\s+/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+      .replace(/View job/gi, '').replace(/\s+/g, ' ')
       .trim();
 
-    // Text format: "Title  Type  Location  Salary  Equity"
     const parts = rawText.split(/\s{2,}|\n/).map(s => s.trim()).filter(Boolean);
     if (parts.length < 1 || parts[0].length < 3) continue;
 
-    // Detect which part is salary (contains K or USD or $)
     const salaryIdx = parts.findIndex(p => /\d+K|\$|USD/i.test(p));
     const salary    = salaryIdx >= 0 ? formatSalary(parts[salaryIdx]) : '';
-
-    // href may be absolute (https://jobs.polymer.co/...) or relative (/slug/id)
-    const jobUrl = href.startsWith('http') ? href : `https://jobs.polymer.co${href}`;
+    const jobUrl    = href.startsWith('http') ? href : `https://jobs.polymer.co${href}`;
 
     jobs.push({
       company:      companyName,
@@ -192,6 +219,16 @@ async function fetchPolymerJobs(pageUrl, companyName) {
       equity:       false,
       url:          jobUrl,
     });
+  }
+
+  if (jobs.length === 0 && html.length > 0) {
+    // Got HTML but couldn't find jobs — surface a diagnostic hint
+    const hasNextData = html.includes('__NEXT_DATA__');
+    throw new Error(
+      `Polymer: got HTML for "${companyName}" (${baseUrl}) but found no job links. ` +
+      `__NEXT_DATA__ present: ${hasNextData}. ` +
+      `HTML snippet: ${html.slice(0, 200)}`
+    );
   }
 
   return jobs;
