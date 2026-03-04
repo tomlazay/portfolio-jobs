@@ -518,14 +518,19 @@ async function fetchCustomJobs(pageUrl, companyName) {
 }
 
 // ── micro1.ai ─────────────────────────────────────────────────
-// micro1 is a Webflow SPA — jobs are loaded client-side from:
-//   https://prod-api.micro1.ai/api/v1/job/portal?page=N&limit=18&keyword=
+// micro1 is a contractor staffing platform. The API returns all jobs
+// (client postings + micro1's own "Core team" internal hiring).
+// We filter for micro1's own roles using is_micro1_account === true,
+// with a tag-name fallback in case the flag behaves differently.
+// API endpoint: https://prod-api.micro1.ai/api/v1/job/portal (POST)
 // Individual posting pages: https://jobs.micro1.ai/post/{UUID}
 async function fetchMicro1Jobs(companyName) {
   const BASE = 'https://prod-api.micro1.ai/api/v1/job/portal';
   const LIMIT = 18;
   const allJobs = [];
   let page = 1;
+  let totalSeen = 0;          // total jobs seen across all pages (for diagnostics)
+  let sampleIsMicro1 = null;  // sample is_micro1_account value for diagnostics
 
   // API requires Origin/Referer headers matching the Webflow frontend.
   // The XHR call from micro1.ai frontend uses POST (not GET), hence
@@ -579,7 +584,22 @@ async function fetchMicro1Jobs(companyName) {
       throw new Error(`micro1 API: empty/unrecognised response. Keys: ${topKeys}${nestedKeys ? ' ' + nestedKeys : ''}. Preview: ${rawText.slice(0, 200)}`);
     }
 
+    totalSeen += list.length;
+
+    // Capture a sample is_micro1_account value for diagnostics (first job on first page)
+    if (sampleIsMicro1 === null && list.length > 0) {
+      sampleIsMicro1 = list[0].is_micro1_account;
+    }
+
     for (const job of list) {
+      // micro1 is a staffing marketplace — all jobs on the platform belong to client companies.
+      // micro1's own internal "Core team" roles are flagged with is_micro1_account === true.
+      // Also check tags array for "core team" as a belt-and-suspenders fallback.
+      const tags     = Array.isArray(job.tags) ? job.tags : Array.isArray(job.job_tags) ? job.job_tags : [];
+      const tagStr   = tags.map(t => (typeof t === 'string' ? t : (t.name || t.label || ''))).join(' ').toLowerCase();
+      const isCoreTeam = job.is_micro1_account === true || tagStr.includes('core team');
+      if (!isCoreTeam) continue;
+
       // micro1 API field names: job_id, job_name, apply_url, engagement_type, location_type
       const id     = job.job_id || job.id || job.uuid || job._id || '';
       const jobUrl = job.apply_url || job.url || job.applyUrl
@@ -616,6 +636,16 @@ async function fetchMicro1Jobs(companyName) {
     const total = json.total || json.data?.total || json.meta?.total || Infinity;
     if (list.length < LIMIT || allJobs.length >= total) break;
     page++;
+  }
+
+  // Diagnostic: if we fetched jobs but none passed the Core team filter,
+  // surface the is_micro1_account sample value so we can adjust the filter logic.
+  if (allJobs.length === 0 && totalSeen > 0) {
+    throw new Error(
+      `micro1: ${totalSeen} jobs fetched but none passed Core team filter. ` +
+      `Sample is_micro1_account = ${JSON.stringify(sampleIsMicro1)}. ` +
+      `Check whether flag is inverted or field name has changed.`
+    );
   }
 
   return allJobs;
