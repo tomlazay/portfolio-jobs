@@ -125,7 +125,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
     title:        job.title || job.name || '',
     department:   job.department || job.category || job.team || '',
     location:     job.location   || job.city     || '',
-    type:         job.employment_type || job.employmentType || job.type || 'Full-time',
+    type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
     workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
     compensation: job.salary || job.compensation || '',
     equity:       false,
@@ -133,26 +133,41 @@ async function fetchPolymerJobs(pageUrl, companyName) {
                   || (job.id ? `https://jobs.polymer.co/${companySlug}/${job.id}` : ''),
   });
 
-  // ── Strategy 1: Public REST API ─────────────────────────────
-  const apiAttempts = [
-    `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`,
-    `https://api.polymer.co/v2/hire/organizations/${companySlug}/jobs`,
-  ];
-  for (const apiUrl of apiAttempts) {
-    try {
+  // ── Strategy 1: Public REST API (paginated) ─────────────────
+  // Polymer's public API is unauthenticated and supports page/per_page params.
+  // Docs: https://developer.polymer.co — GET /v1/hire/organizations/{slug}/jobs
+  try {
+    const PER_PAGE = 50;
+    const apiJobs  = [];
+    let   apiPage  = 1;
+    while (true) {
+      const apiUrl = `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`
+                   + `?page=${apiPage}&per_page=${PER_PAGE}`;
       const apiRes = await fetch(apiUrl, {
         headers: { 'Accept': 'application/json', 'User-Agent': SCRAPE_HEADERS['User-Agent'] },
       });
-      if (apiRes.ok) {
-        const apiData = await apiRes.json();
-        const apiList = Array.isArray(apiData)       ? apiData
-                      : Array.isArray(apiData.jobs)  ? apiData.jobs
-                      : Array.isArray(apiData.data)  ? apiData.data
-                      : [];
-        if (apiList.length > 0) return apiList.map(mapJob);
-      }
-    } catch (_) { /* try next */ }
-  }
+      if (!apiRes.ok) break;   // fall through to HTML strategies
+
+      const apiData = await apiRes.json();
+      // Response: array of jobs, or { jobs: [...] }, or { data: [...] }
+      const page = Array.isArray(apiData)       ? apiData
+                 : Array.isArray(apiData.jobs)  ? apiData.jobs
+                 : Array.isArray(apiData.data)  ? apiData.data
+                 : [];
+
+      // Only include active/published jobs (filter out drafts, archived, etc.)
+      const active = page.filter(j => {
+        const s = (j.status || '').toLowerCase();
+        return !s || s === 'published' || s === 'active' || s === 'open';
+      });
+      apiJobs.push(...active.map(mapJob));
+
+      // Stop paginating when we get a short page
+      if (page.length < PER_PAGE) break;
+      apiPage++;
+    }
+    if (apiJobs.length > 0) return apiJobs;
+  } catch (_) { /* fall through to HTML strategies */ }
 
   // ── Strategy 2 & 3: fetch HTML, then try __NEXT_DATA__ then link-scrape ──
   // Use minimal headers — the suspicious Sec-Fetch headers can trigger bot detection.
