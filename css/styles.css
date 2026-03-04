@@ -240,13 +240,13 @@ body {
 }
 /* Per-company badge backgrounds */
 .logo-posh      { background: #ffffff; }
-.logo-north     { background: #1e1b2e; border-color: #2d2a3e; }
+.logo-north     { background: #000000; border-color: #222222; }
 .logo-sent      { background: #ffffff; }
 .logo-cyvl      { background: #ffffff; }
 .logo-flex      { background: #ffffff; }
 .logo-daylit    { background: #ffffff; }
 .logo-allstacks { background: #ffffff; }
-.logo-roadsync  { background: #ffffff; }
+.logo-roadsync  { background: #000000; border-color: #222222; }
 .logo-ziflow    { background: #1a0040; border-color: #2d0060; }
 .logo-fullcast  { background: #0a0f1e; border-color: #1a2040; }
 .logo-arpio     { background: #ffffff; }

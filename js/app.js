@@ -36,7 +36,7 @@ const COMPANY_CONFIG = {
     logoClass: 'logo-allstacks',
   },
   RoadSync: {
-    logoUrl:   'https://images.teamtailor-cdn.com/images/s3/teamtailor-production/logotype-v3/image_uploads/4c75203a-3df8-462d-a7b1-6821200ba318/original.jpeg',
+    logoUrl:   'https://roadsync.com/wp-content/themes/roadsyncwp/assets/img/logo-white.svg',
     logoClass: 'logo-roadsync',
   },
   Ziflow: {
