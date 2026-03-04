@@ -102,8 +102,9 @@ async function fetchAshbyJobs(handle, companyName) {
     location:     job.location   || '',
     type:         ASHBY_TYPE_MAP[job.employmentType] || 'Full time',
     workMode:     job.isRemote ? 'Remote' : (MODE_MAP[job.workplaceType] || 'On-site'),
-    compensation: '',
-    equity:       false,
+    // compensationTierSummary is a preformatted string e.g. "$80,000 – $120,000 USD"
+    compensation: formatSalary(job.compensationTierSummary || ''),
+    equity:       !!(job.secondaryCompensation),
     url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
   }));
 }
@@ -114,17 +115,28 @@ async function fetchLeverJobs(handle, companyName) {
   if (!res.ok) throw new Error(`Lever fetch failed for "${handle}": ${res.status}`);
   const data = await res.json();
 
-  return (Array.isArray(data) ? data : []).map(job => ({
-    company:      companyName,
-    title:        (job.text || '').trim(),
-    department:   job.categories?.team       || '',
-    location:     job.categories?.location   || '',
-    type:         job.categories?.commitment || 'Full-time',
-    workMode:     MODE_MAP[job.workplaceType] || 'On-site',
-    compensation: '',
-    equity:       false,
-    url:          job.hostedUrl || `https://jobs.lever.co/${handle}`,
-  }));
+  return (Array.isArray(data) ? data : []).map(job => {
+    // salaryRange: { min: 80000, max: 120000, currency: "USD", interval: "per year" }
+    const sr   = job.salaryRange;
+    let comp   = '';
+    if (sr && (sr.min || sr.max)) {
+      const fmt  = n => n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+      comp = sr.min && sr.max
+        ? `${fmt(sr.min)} – ${fmt(sr.max)}`
+        : sr.min ? `${fmt(sr.min)}+` : `Up to ${fmt(sr.max)}`;
+    }
+    return {
+      company:      companyName,
+      title:        (job.text || '').trim(),
+      department:   job.categories?.team       || '',
+      location:     job.categories?.location   || '',
+      type:         job.categories?.commitment || 'Full-time',
+      workMode:     MODE_MAP[job.workplaceType] || 'On-site',
+      compensation: comp,
+      equity:       false,
+      url:          job.hostedUrl || `https://jobs.lever.co/${handle}`,
+    };
+  });
 }
 
 // ── Polymer ───────────────────────────────────────────────────
@@ -599,6 +611,15 @@ async function fetchRipplingJobs(boardSlug, companyName) {
   return items.map(job => {
     const loc = (job.locations || []).map(l => l.name || l.city || '').filter(Boolean).join(', ');
     const wt  = (job.locations?.[0]?.workplaceType || '').toUpperCase();
+    // Rippling may provide a compensationRange object {min, max, currency} or a salary string
+    const cr   = job.compensationRange || job.salaryRange || {};
+    let comp   = job.salary || job.compensation || '';
+    if (!comp && (cr.min || cr.max)) {
+      const fmt = n => n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+      comp = cr.min && cr.max
+        ? `${fmt(cr.min)} – ${fmt(cr.max)}`
+        : cr.min ? `${fmt(cr.min)}+` : `Up to ${fmt(cr.max)}`;
+    }
     return {
       company:      companyName,
       title:        (job.name || '').trim(),
@@ -606,7 +627,7 @@ async function fetchRipplingJobs(boardSlug, companyName) {
       location:     loc,
       type:         'Full-time',
       workMode:     RIPPLING_MODE[wt] || 'On-site',
-      compensation: '',
+      compensation: formatSalary(comp),
       equity:       false,
       url:          job.url || `https://ats.rippling.com/${boardSlug}/jobs/${job.id}`,
     };
@@ -880,11 +901,39 @@ async function fetchMicro1Jobs(companyName) {
 
 // ── Helpers ───────────────────────────────────────────────────
 function formatSalary(raw) {
-  // "80K - 100K USD a year" → "$80K – $100K"
-  const nums = raw.match(/\d+K/gi);
-  if (nums && nums.length >= 2) return `$${nums[0].toUpperCase()} – $${nums[1].toUpperCase()}`;
-  if (nums && nums.length === 1) return `$${nums[0].toUpperCase()}`;
-  return raw;
+  if (!raw) return '';
+
+  // Already in compact K/M notation (e.g. "$80K – $100K"): return as-is
+  if (/^\$\d+[KkMm]\s*[–-]\s*\$\d+[KkMm]$/.test(raw.trim())) return raw.trim();
+
+  // Ashby: "$80,000 – $120,000 USD" or "$80,000 – $120,000 USD a year"
+  // Extract dollar amounts with commas, convert to K notation
+  const dollarNums = raw.match(/\$\s*([\d,]+)/g);
+  if (dollarNums && dollarNums.length >= 2) {
+    const toK = s => {
+      const n = parseInt(s.replace(/[$,\s]/g, ''), 10);
+      return n >= 1000 ? `$${Math.round(n / 1000)}K` : `$${n}`;
+    };
+    return `${toK(dollarNums[0])} – ${toK(dollarNums[1])}`;
+  }
+  if (dollarNums && dollarNums.length === 1) {
+    const n = parseInt(dollarNums[0].replace(/[$,\s]/g, ''), 10);
+    return n >= 1000 ? `$${Math.round(n / 1000)}K` : dollarNums[0];
+  }
+
+  // Polymer / Breezy: "80K - 100K USD a year" or "20 USD an hour"
+  const kNums = raw.match(/\d+\s*K/gi);
+  if (kNums && kNums.length >= 2) return `$${kNums[0].toUpperCase().replace(/\s/,'')} – $${kNums[1].toUpperCase().replace(/\s/,'')}`;
+  if (kNums && kNums.length === 1) return `$${kNums[0].toUpperCase().replace(/\s/,'')}`;
+
+  // Hourly: "20 USD an hour" → "20 USD/hr"
+  if (/\bUSD\b.*\bh(ou)?r/i.test(raw) || /\bper\s+h(ou)?r/i.test(raw)) {
+    const n = raw.match(/\d+/)?.[0];
+    return n ? `$${n}/hr` : raw.trim();
+  }
+
+  // Fallback: return as-is, stripping trailing "USD", "a year", "per year" noise
+  return raw.replace(/\s+(USD|a year|per year|annually)\s*$/i, '').trim();
 }
 
 // ── Main handler ─────────────────────────────────────────────
