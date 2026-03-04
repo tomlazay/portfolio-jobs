@@ -592,12 +592,13 @@ async function fetchMicro1Jobs(companyName) {
     }
 
     for (const job of list) {
-      // micro1 is a staffing marketplace — all jobs on the platform belong to client companies.
-      // micro1's own internal "Core team" roles are flagged with is_micro1_account === true.
-      // Also check tags array for "core team" as a belt-and-suspenders fallback.
+      // micro1 is a staffing marketplace. is_micro1_account === true flags CLIENT jobs
+      // (companies that post through micro1). micro1's own "Core team" roles are identified
+      // by the company/organization name being "micro1", or by a "core team" tag.
+      const companyField = (job.company_name || job.company || job.organization || job.employer || '').toLowerCase();
       const tags     = Array.isArray(job.tags) ? job.tags : Array.isArray(job.job_tags) ? job.job_tags : [];
       const tagStr   = tags.map(t => (typeof t === 'string' ? t : (t.name || t.label || ''))).join(' ').toLowerCase();
-      const isCoreTeam = job.is_micro1_account === true || tagStr.includes('core team');
+      const isCoreTeam = companyField.includes('micro1') || tagStr.includes('core team') || job.is_core_team === true;
       if (!isCoreTeam) continue;
 
       // micro1 API field names: job_id, job_name, apply_url, engagement_type, location_type
@@ -639,12 +640,12 @@ async function fetchMicro1Jobs(companyName) {
   }
 
   // Diagnostic: if we fetched jobs but none passed the Core team filter,
-  // surface the is_micro1_account sample value so we can adjust the filter logic.
+  // surface key field values from the first job so we can identify the right filter.
   if (allJobs.length === 0 && totalSeen > 0) {
     throw new Error(
       `micro1: ${totalSeen} jobs fetched but none passed Core team filter. ` +
       `Sample is_micro1_account = ${JSON.stringify(sampleIsMicro1)}. ` +
-      `Check whether flag is inverted or field name has changed.`
+      `Check company_name / tags / is_core_team fields on the API response.`
     );
   }
 
