@@ -111,15 +111,51 @@ async function fetchLeverJobs(handle, companyName) {
 
 // ── Polymer ───────────────────────────────────────────────────
 async function fetchPolymerJobs(pageUrl, companyName) {
-  const baseUrl = pageUrl.split('#')[0].split('?')[0];
+  const baseUrl     = pageUrl.split('#')[0].split('?')[0];
+  const companySlug = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
 
-  const res = await fetch(baseUrl, { headers: SCRAPE_HEADERS });
-  if (!res.ok) throw new Error(`Polymer fetch failed for "${companyName}": ${res.status}`);
+  // Try the public Polymer REST API first (avoids HTML scrape 403s)
+  try {
+    const apiRes = await fetch(
+      `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`,
+      { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+    );
+    if (apiRes.ok) {
+      const apiData = await apiRes.json();
+      const apiList = Array.isArray(apiData) ? apiData
+                    : Array.isArray(apiData.jobs) ? apiData.jobs
+                    : Array.isArray(apiData.data) ? apiData.data
+                    : [];
+      if (apiList.length > 0) {
+        return apiList.map(job => ({
+          company:      companyName,
+          title:        job.title || job.name || '',
+          department:   job.department || job.category || '',
+          location:     job.location || job.city || '',
+          type:         job.employment_type || job.type || 'Full-time',
+          workMode:     job.remote ? 'Remote' : (job.work_mode || 'On-site'),
+          compensation: job.salary || '',
+          equity:       false,
+          url:          job.url || job.apply_url || `https://jobs.polymer.co/${companySlug}/${job.id}`,
+        }));
+      }
+    }
+  } catch (_) { /* fall through to HTML scrape */ }
+
+  // Fallback: scrape the HTML job board page with browser-like headers
+  const scrapeHeaders = {
+    ...SCRAPE_HEADERS,
+    'Referer':           'https://jobs.polymer.co/',
+    'sec-fetch-site':    'same-origin',
+    'sec-fetch-mode':    'navigate',
+    'sec-fetch-dest':    'document',
+  };
+  const res = await fetch(baseUrl, { headers: scrapeHeaders });
+  if (!res.ok) throw new Error(`Polymer fetch failed for "${companyName}" (${baseUrl}): ${res.status}`);
   const html = await res.text();
 
   const jobs = [];
   // Polymer job links: href="/company/numeric-id" OR href="https://jobs.polymer.co/company/numeric-id"
-  const companySlug = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
   const linkRegex = new RegExp(
     `href="((?:https://jobs\\.polymer\\.co)?/${companySlug}/\\d+)"[^>]*>([\\s\\S]*?)<\\/a>`, 'gi'
   );
@@ -651,8 +687,8 @@ export default async function handler(req, res) {
           allJobs.push(...await fetchCustomJobs(url, company.name));
         }
       } catch (err) {
-        console.error(`Error fetching ${company.name}:`, err.message);
-        errors.push({ company: company.name, error: err.message });
+        console.error(`Error fetching ${company.name} (${url}):`, err.message);
+        errors.push({ company: company.name, url, error: err.message });
       }
     }
 
