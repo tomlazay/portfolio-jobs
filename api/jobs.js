@@ -754,6 +754,24 @@ async function fetchCustomJobs(pageUrl, companyName) {
     }
   }
 
+  // ── Per-job compensation extraction ──────────────────────────
+  // Fetch each individual job page in parallel and scan for a "Compensation"
+  // heading section. Failures are silently ignored so a single slow/blocked
+  // page doesn't break the whole response.
+  if (jobs.length > 0) {
+    await Promise.allSettled(jobs.map(async job => {
+      try {
+        const jobRes = await fetch(job.url, { headers: SCRAPE_HEADERS });
+        if (!jobRes.ok) return;
+        const jobHtml = await jobRes.text();
+        const comp = extractCompensationFromHtml(jobHtml);
+        if (comp) job.compensation = comp;
+      } catch {
+        // non-fatal
+      }
+    }));
+  }
+
   // ── Embedded platform fallbacks ──────────────────────────────
   // If no static links found, check whether the page embeds a known
   // ATS widget and delegate to the correct handler.
@@ -937,8 +955,13 @@ async function fetchMicro1Jobs(companyName) {
         location:     job.location   || job.city     || '',
         type:         jobType,
         workMode:     isRemote ? 'Remote' : 'On-site',
-        // comp is non-numeric for core team jobs, so skip the $NaNK formatting
-        compensation: job.salary || job.compensation || '',
+        // For core team jobs, ideal_yearly_compensation IS the salary string
+        // (e.g. "$350K - $600K/yr"). Strip the /yr suffix then normalise.
+        compensation: formatSalary(
+          (job.salary || job.compensation ||
+           (typeof comp === 'string' ? comp : ''))
+          .replace(/\/yr\b/i, '').trim()
+        ),
         equity:       false,
         url:          jobUrl,
       });
@@ -964,6 +987,48 @@ async function fetchMicro1Jobs(companyName) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+// Scan a job-description HTML page for a "Compensation" section heading
+// and extract any salary range found in the following paragraph(s).
+// Returns a formatted string like "$100K – $200K", or '' if nothing found.
+//
+// Handles headings wrapped in inline tags, e.g.:
+//   <h2><strong>Compensation</strong></h2>
+//   <p>The base pay for this role is: 100k-200k per year.</p>
+function extractCompensationFromHtml(html) {
+  const headingRe = /<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi;
+  let hm;
+  while ((hm = headingRe.exec(html)) !== null) {
+    const plain = hm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (!/^compensation$/i.test(plain)) continue;
+
+    // Grab text up to the next heading (cap at 1 500 chars to avoid runaway)
+    const after   = html.slice(hm.index + hm[0].length);
+    const nextH   = after.search(/<h[1-6][\s>]/i);
+    const section = (nextH >= 0 ? after.slice(0, nextH) : after.slice(0, 1500))
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // $X,000 – $Y,000  or  $XK – $YK  (dash or prose "and" as separator)
+    // e.g. "$80,000 - $120,000", "$90K – $130K", "between $80,000 and $120,000"
+    const dollarRange = section.match(/\$\s*[\d,]+[KkMm]?\s*(?:[-–—]|\s+and\s+)\s*\$\s*[\d,]+[KkMm]?/i);
+    if (dollarRange) return formatSalary(dollarRange[0].replace(/\s+and\s+/i, ' – '));
+
+    // XK – YK  (no dollar sign: "100k-200k", "100K - 200K")
+    const kRange = section.match(/\d+\s*[KkMm]\s*[-–—]\s*\d+\s*[KkMm]/);
+    if (kRange) return formatSalary(kRange[0]);
+
+    // Hourly: "$45/hr", "$45 per hour"
+    const hourly = section.match(/\$\s*(\d+(?:\.\d+)?)\s*(?:\/\s*hr|per\s+h(?:ou)?r|an\s+h(?:ou)?r)/i);
+    if (hourly) return `$${hourly[1]}/hr`;
+
+    break; // found the heading but no parseable salary
+  }
+  return '';
+}
+
 function formatSalary(raw) {
   if (!raw) return '';
 
