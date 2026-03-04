@@ -642,8 +642,8 @@ export default async function handler(req, res) {
     const errors    = [];
 
     for (const company of companies) {
+      const url = company.url;   // declared outside try so catch block can reference it
       try {
-        const url = company.url;
 
         if (/jobs\.ashbyhq\.com\/([^/?#\s]+)/.test(url)) {
           const handle = url.match(/jobs\.ashbyhq\.com\/([^/?#\s]+)/)[1];
