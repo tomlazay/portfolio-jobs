@@ -72,7 +72,7 @@ async function fetchJobs() {
     if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
 
-    ALL_JOBS = data.jobs || [];
+    ALL_JOBS = normalizeJobs(data.jobs || []);
 
     // Update hero stats
     const companyCount = document.getElementById('company-count');
@@ -113,6 +113,27 @@ function showError(msg) {
   const list = document.getElementById('jobs-list');
   if (list) list.innerHTML =
     `<div class="load-error">⚠️ Could not load jobs — ${msg}. Please try refreshing.</div>`;
+}
+
+// ── Location & Department normalisation ──────────────────────
+// Canonical map for known location variants (case-insensitive key lookup).
+// Add entries here whenever new aliases appear in the filter dropdown.
+const LOCATION_ALIASES = {
+  'new york city':  'New York, NY',
+  'new york ny':    'New York, NY',
+  'new york, ny':   'New York, NY',
+  'new york':       'New York, NY',
+  'nyc':            'New York, NY',
+};
+
+function normalizeLocation(raw) {
+  const key = (raw || '').toLowerCase().trim();
+  return LOCATION_ALIASES[key] || raw;
+}
+
+// Run once after ALL_JOBS is populated to canonicalise location strings.
+function normalizeJobs(jobs) {
+  return jobs.map(j => ({ ...j, location: normalizeLocation(j.location) }));
 }
 
 // ── Location matching helper ──────────────────────────────────

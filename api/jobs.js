@@ -236,8 +236,8 @@ async function fetchTeamtailorJobs(pageUrl, companyName) {
     const rawText = match[2]
       .replace(/<svg[\s\S]*?<\/svg>/gi, '')  // remove SVG icons
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&#183;/g, '·')
-      .replace(/\u00b7/g, '·')
+      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&middot;/g, '·')
+      .replace(/&#183;/g, '·').replace(/\u00b7/g, '·')
       .replace(/[ \t]+/g, ' ')               // collapse spaces (keep newlines for now)
       .replace(/\n\s*/g, '\n')
       .trim();
@@ -250,11 +250,34 @@ async function fetchTeamtailorJobs(pageUrl, companyName) {
 
     if (!title || title.length < 2) continue;
 
-    // Meta: "Sales · Atlanta, GA · Hybrid"
+    // Meta formats Teamtailor uses:
+    //   3-part: "Dept · Location · WorkMode"   (most common)
+    //   2-part: "Location · WorkMode"           (no dept on some cards)
+    //   2-part: "Dept · WorkMode"               (no location)
+    // Detect by checking whether the last part is a known work-mode value.
+    const KNOWN_MODES = new Set(['remote', 'hybrid', 'on-site', 'on site', 'in office', 'in-office', 'flexible']);
     const metaParts = meta.split(/\s*·\s*/).map(s => s.trim()).filter(Boolean);
-    const dept     = metaParts[0] || '';
-    const location = metaParts[1] || '';
-    const wm       = metaParts[2] || '';
+
+    let dept = '', location = '', wm = '';
+    if (metaParts.length >= 3) {
+      [dept, location, wm] = metaParts;
+    } else if (metaParts.length === 2) {
+      const lastIsMode = KNOWN_MODES.has(metaParts[1].toLowerCase());
+      const firstHasComma = metaParts[0].includes(',');  // "Atlanta, GA" → location
+      if (lastIsMode && firstHasComma) {
+        // "Atlanta, GA · Hybrid" — no dept
+        [location, wm] = metaParts;
+      } else if (lastIsMode) {
+        // "Engineering · Hybrid" — dept + mode, no location
+        [dept, wm] = metaParts;
+      } else {
+        // "Dept · Location" — no work-mode listed
+        [dept, location] = metaParts;
+      }
+    } else if (metaParts.length === 1) {
+      if (KNOWN_MODES.has(metaParts[0].toLowerCase())) wm = metaParts[0];
+      else dept = metaParts[0];
+    }
     const workMode = MODE_MAP[wm.toLowerCase()] || (wm || 'On-site');
 
     jobs.push({
