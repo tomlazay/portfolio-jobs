@@ -272,28 +272,43 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   );
   let match;
   while ((match = linkRegex.exec(html)) !== null) {
-    const href    = match[1];
-    const rawText = match[2]
+    const href = match[1];
+
+    // Strip tags → newlines, decode entities, remove boilerplate.
+    // Split on newlines BEFORE collapsing whitespace (collapsing first would
+    // destroy the tag-derived line breaks). Also split on "·" separators that
+    // Polymer uses to pack multiple meta fields into a single element.
+    const parts = match[2]
       .replace(/<[^>]+>/g, '\n')
       .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
-      .replace(/View job/gi, '').replace(/\s+/g, ' ')
-      .trim();
+      .replace(/View job/gi, '')
+      .split('\n')
+      .flatMap(s => s.split(/\s*·\s*/))        // "Full-time · Boston, MA · $80K"
+      .map(s => s.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
 
-    const parts = rawText.split(/\s{2,}|\n/).map(s => s.trim()).filter(Boolean);
     if (parts.length < 1 || parts[0].length < 3) continue;
 
-    const salaryIdx = parts.findIndex(p => /\d+K|\$|USD/i.test(p));
-    const salary    = salaryIdx >= 0 ? formatSalary(parts[salaryIdx]) : '';
-    const jobUrl    = href.startsWith('http') ? href : `https://jobs.polymer.co${href}`;
+    const jobUrl = href.startsWith('http') ? href : `https://jobs.polymer.co${href}`;
+
+    // Pattern-based field extraction (order-independent — Polymer's HTML structure
+    // varies across companies and job types, so fixed indices are unreliable).
+    const title      = parts[0];
+    const typeSnip   = parts.find(p => /^(full[\s-]?time|part[\s-]?time|contract|intern)/i.test(p));
+    const salarySnip = parts.find(p => /\d+\s*K|\$\s*\d|USD/i.test(p));
+    // Location: looks like "City, ST" or "Remote" (has a comma, or is exactly "Remote")
+    const locationSnip = parts.slice(1).find(p =>
+      p !== typeSnip && p !== salarySnip && (p.includes(',') || /^remote$/i.test(p))
+    );
 
     jobs.push({
       company:      companyName,
-      title:        parts[0],
+      title,
       department:   '',
-      location:     parts[2] || '',
-      type:         parts[1] || 'Full-time',
-      workMode:     'On-site',
-      compensation: salary,
+      location:     locationSnip || '',
+      type:         typeSnip    || 'Full-time',
+      workMode:     /remote/i.test(locationSnip || '') ? 'Remote' : 'On-site',
+      compensation: salarySnip ? formatSalary(salarySnip) : '',
       equity:       false,
       url:          jobUrl,
     });
