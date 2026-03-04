@@ -764,6 +764,51 @@ async function fetchCustomJobs(pageUrl, companyName) {
 // with a tag-name fallback in case the flag behaves differently.
 // API endpoint: https://prod-api.micro1.ai/api/v1/job/portal (POST)
 // Individual posting pages: https://jobs.micro1.ai/post/{UUID}
+// Infer a department string from a job title for platforms (e.g. micro1)
+// that don't expose a structured department field.
+// Returns a department string matching the site's filter tags, or '' if unknown.
+function inferDepartmentFromTitle(title) {
+  const t = (title || '').toLowerCase();
+
+  // Engineering — developers, MTS, AI/ML, forward-deployed, robotics/research labs
+  if (/\b(engineer|developer|dev\b|fullstack|full.?stack|frontend|front.?end|backend|back.?end|software|ai\/ml|machine learning|member of technical staff|\bmts\b|forward deployed|robotics|research lab)\b/.test(t))
+    return 'Engineering';
+
+  // Design
+  if (/\b(designer|ui\/ux|ux|ui\b|visual design|creative)\b/.test(t))
+    return 'Design';
+
+  // Sales — explicit "sales", "client partner", "account executive/manager"
+  if (/\b(sales|client partner|account executive|account manager)\b/.test(t))
+    return 'Sales';
+
+  // Business Development — partnerships, BDR, SDR
+  if (/\b(partnerships?|business development|bdr|sdr)\b/.test(t))
+    return 'Business Development';
+
+  // Product
+  if (/\b(product manager|product lead|product owner)\b/.test(t))
+    return 'Product';
+
+  // Marketing
+  if (/\b(marketing|content|social media|brand|growth|copywriter)\b/.test(t))
+    return 'Marketing';
+
+  // Data & Analytics
+  if (/\b(data scientist|data analyst|analytics|intelligence analyst)\b/.test(t))
+    return 'Data & Analytics';
+
+  // Finance
+  if (/\b(finance|financial|accountant|accounting|controller|cfo)\b/.test(t))
+    return 'Finance';
+
+  // Operations — project/program leads, ops, admin, personal assistant, chief of staff
+  if (/\b(strategic project|project manager|project lead|program manager|operations|ops\b|personal assistant|chief of staff|coordinator)\b/.test(t))
+    return 'Operations';
+
+  return '';
+}
+
 async function fetchMicro1Jobs(companyName) {
   const BASE = 'https://prod-api.micro1.ai/api/v1/job/portal';
   const LIMIT = 18;
@@ -869,7 +914,7 @@ async function fetchMicro1Jobs(companyName) {
       allJobs.push({
         company:      companyName,
         title,
-        department:   job.department || job.category || job.team || '',
+        department:   job.department || job.category || job.team || inferDepartmentFromTitle(title),
         location:     job.location   || job.city     || '',
         type:         jobType,
         workMode:     isRemote ? 'Remote' : 'On-site',
