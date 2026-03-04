@@ -116,6 +116,40 @@ function showError(msg) {
 }
 
 // ── Location & Department normalisation ──────────────────────
+
+// Full US state name → 2-letter postal abbreviation.
+// Used to shorten "Boston, Massachusetts" → "Boston, MA" etc.
+const STATE_ABBR = {
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+  'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+  'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+  'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+  'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+  'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+  'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+  'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+  'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+  'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+  'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+  'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
+};
+
+// Replaces any full state name in a location string with its abbreviation.
+// e.g. "Boston, Massachusetts" → "Boston, MA"
+//      "Chicago, Illinois"     → "Chicago, IL"
+// Only matches state names that follow a comma (i.e. the state portion of
+// "City, State"), so standalone city names like "Washington" or already-
+// abbreviated strings like "New York, NY" are left untouched.
+function abbreviateStates(str) {
+  const pattern = Object.keys(STATE_ABBR)
+    .sort((a, b) => b.length - a.length)
+    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  return str.replace(new RegExp(`,\\s*(${pattern})\\b`, 'gi'),
+    (_, state) => `, ${STATE_ABBR[state.toLowerCase()]}`);
+}
+
 // Canonical map for known location variants (case-insensitive key lookup).
 // Add entries here whenever new aliases appear in the filter dropdown.
 const LOCATION_ALIASES = {
@@ -128,7 +162,11 @@ const LOCATION_ALIASES = {
 
 function normalizeLocation(raw) {
   const key = (raw || '').toLowerCase().trim();
-  return LOCATION_ALIASES[key] || raw;
+  // 1. Check explicit alias map first
+  const aliased = LOCATION_ALIASES[key];
+  if (aliased) return aliased;
+  // 2. Abbreviate any full state names found in the string
+  return abbreviateStates(raw);
 }
 
 // Run once after ALL_JOBS is populated to canonicalise location strings.
