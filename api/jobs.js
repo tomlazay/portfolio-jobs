@@ -111,66 +111,79 @@ async function fetchLeverJobs(handle, companyName) {
 
 // ── Polymer ───────────────────────────────────────────────────
 // Polymer job boards are Next.js apps at jobs.polymer.co/{slug}.
+// Companies sometimes rename (e.g. Lendica → Daylit) but keep their old
+// Polymer slug, so the Google Sheet URL may redirect to a different slug.
 // Strategy (tried in order):
 //   1. Public REST API  — api.polymer.co/v1/hire/organizations/{slug}/jobs
-//   2. __NEXT_DATA__    — JSON embedded in the page <script> tag (most reliable)
+//      (tried with original slug first, then redirect-resolved slug if different)
+//   2. __NEXT_DATA__    — JSON embedded in the page <script> tag
 //   3. Link scraping    — parse <a href="/{slug}/{id}"> from HTML as last resort
 async function fetchPolymerJobs(pageUrl, companyName) {
   const baseUrl     = pageUrl.split('#')[0].split('?')[0];
-  const companySlug = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
+  const inputSlug   = baseUrl.replace(/.*polymer\.co\//, '').replace(/\/$/, '');
 
-  // Helper: map a raw Polymer API/Next job object → our schema
-  const mapJob = job => ({
-    company:      companyName,
-    title:        job.title || job.name || '',
-    department:   job.department || job.category || job.team || '',
-    location:     job.location   || job.city     || '',
-    type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
-    workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
-    compensation: job.salary || job.compensation || '',
-    equity:       false,
-    url:          job.url || job.apply_url || job.applyUrl
-                  || (job.id ? `https://jobs.polymer.co/${companySlug}/${job.id}` : ''),
-  });
-
-  // ── Strategy 1: Public REST API (paginated) ─────────────────
-  // Polymer's public API is unauthenticated and supports page/per_page params.
-  // Docs: https://developer.polymer.co — GET /v1/hire/organizations/{slug}/jobs
-  try {
+  // Helper: try the Polymer public REST API for a given slug (paginated)
+  // Returns: array of mapped jobs (may be empty), or null if HTTP error
+  async function tryPolymerApi(slug) {
     const PER_PAGE = 50;
     const apiJobs  = [];
     let   apiPage  = 1;
+    let   rawSample = null;   // keep first page raw data for diagnostics
     while (true) {
-      const apiUrl = `https://api.polymer.co/v1/hire/organizations/${companySlug}/jobs`
+      const apiUrl = `https://api.polymer.co/v1/hire/organizations/${slug}/jobs`
                    + `?page=${apiPage}&per_page=${PER_PAGE}`;
       const apiRes = await fetch(apiUrl, {
         headers: { 'Accept': 'application/json', 'User-Agent': SCRAPE_HEADERS['User-Agent'] },
       });
-      if (!apiRes.ok) break;   // fall through to HTML strategies
+      if (!apiRes.ok) return null;   // signal failure to caller
 
       const apiData = await apiRes.json();
-      // Response: array of jobs, or { jobs: [...] }, or { data: [...] }
+      if (apiPage === 1) rawSample = apiData;   // save for diagnostics
       const page = Array.isArray(apiData)       ? apiData
                  : Array.isArray(apiData.jobs)  ? apiData.jobs
                  : Array.isArray(apiData.data)  ? apiData.data
                  : [];
 
-      // Only include active/published jobs (filter out drafts, archived, etc.)
+      // Exclude clearly inactive/closed jobs; include everything else
+      // (using a denylist so unknown status values don't silently drop jobs)
+      const INACTIVE = new Set(['draft', 'archived', 'closed', 'expired', 'deleted', 'inactive', 'removed', 'filled']);
       const active = page.filter(j => {
         const s = (j.status || '').toLowerCase();
-        return !s || s === 'published' || s === 'active' || s === 'open';
+        return !INACTIVE.has(s);
       });
-      apiJobs.push(...active.map(mapJob));
 
-      // Stop paginating when we get a short page
+      // mapJob needs the slug for fallback URLs — capture it in closure
+      apiJobs.push(...active.map(job => ({
+        company:      companyName,
+        title:        job.title || job.name || '',
+        department:   job.department || job.category || job.team || '',
+        location:     job.location   || job.city     || '',
+        type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
+        workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
+        compensation: job.salary || job.compensation || '',
+        equity:       false,
+        url:          job.url || job.apply_url || job.applyUrl
+                      || (job.id ? `https://jobs.polymer.co/${slug}/${job.id}` : ''),
+      })));
+
       if (page.length < PER_PAGE) break;
       apiPage++;
     }
-    if (apiJobs.length > 0) return apiJobs;
-  } catch (_) { /* fall through to HTML strategies */ }
+    return apiJobs;   // may be empty array if org exists but has no active jobs
+  }
 
-  // ── Strategy 2 & 3: fetch HTML, then try __NEXT_DATA__ then link-scrape ──
-  // Use minimal headers — the suspicious Sec-Fetch headers can trigger bot detection.
+  // ── Strategy 1a: API with the slug from the Google Sheet ────
+  let apiRawSample = null;
+  try {
+    const result = await tryPolymerApi(inputSlug);
+    if (result && result.length > 0) return result;
+    apiRawSample = rawSample;   // capture for diagnostics if we fall through
+  } catch (_) { /* fall through */ }
+
+  // ── Strategies 2 & 3 require the HTML page ──────────────────
+  // fetch() follows redirects automatically; .url gives the final URL.
+  // This is critical for renamed companies (e.g. sheet has /daylit but
+  // Polymer redirects to /lendica — slug mismatch breaks link scraping).
   const htmlRes = await fetch(baseUrl, {
     headers: {
       'User-Agent':      SCRAPE_HEADERS['User-Agent'],
@@ -185,27 +198,50 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   }
   const html = await htmlRes.text();
 
-  // ── Strategy 2: __NEXT_DATA__ (Next.js embeds all page props as JSON) ──
+  // Resolve the effective slug from the final URL after any redirect
+  const finalUrl      = htmlRes.url || baseUrl;
+  const resolvedSlug  = finalUrl.replace(/.*polymer\.co\//, '').replace(/[/?#].*$/, '') || inputSlug;
+
+  // ── Strategy 1b: API retry with the redirect-resolved slug ──
+  if (resolvedSlug !== inputSlug) {
+    try {
+      const result = await tryPolymerApi(resolvedSlug);
+      if (result && result.length > 0) return result;
+    } catch (_) { /* fall through */ }
+  }
+
+  // ── Strategy 2: __NEXT_DATA__ (Next.js server-side props) ───
   const ndMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
   if (ndMatch) {
     try {
       const nd   = JSON.parse(ndMatch[1]);
       const pp   = nd?.props?.pageProps || {};
-      // Polymer stores jobs under pageProps.jobs or pageProps.organization.jobs
-      const list = Array.isArray(pp.jobs)                  ? pp.jobs
-                 : Array.isArray(pp.organization?.jobs)    ? pp.organization.jobs
-                 : Array.isArray(pp.data?.jobs)            ? pp.data.jobs
-                 : Array.isArray(pp.initialJobs)           ? pp.initialJobs
+      const list = Array.isArray(pp.jobs)               ? pp.jobs
+                 : Array.isArray(pp.organization?.jobs) ? pp.organization.jobs
+                 : Array.isArray(pp.data?.jobs)         ? pp.data.jobs
+                 : Array.isArray(pp.initialJobs)        ? pp.initialJobs
                  : [];
-      if (list.length > 0) return list.map(mapJob);
-    } catch (_) { /* fall through to link scraping */ }
+      if (list.length > 0) {
+        return list.map(job => ({
+          company:      companyName,
+          title:        job.title || job.name || '',
+          department:   job.department || job.category || job.team || '',
+          location:     job.location   || job.city     || '',
+          type:         job.employment_type || job.employmentType || job.kind || job.type || 'Full-time',
+          workMode:     (job.remote || job.isRemote) ? 'Remote' : (job.work_mode || job.workMode || 'On-site'),
+          compensation: job.salary || job.compensation || '',
+          equity:       false,
+          url:          job.url || job.apply_url || job.applyUrl
+                        || (job.id ? `https://jobs.polymer.co/${resolvedSlug}/${job.id}` : ''),
+        }));
+      }
+    } catch (_) { /* fall through */ }
   }
 
-  // ── Strategy 3: link scraping ───────────────────────────────
-  // Polymer job links: href="/{slug}/{id}" or href="https://jobs.polymer.co/{slug}/{id}"
+  // ── Strategy 3: link scraping using the resolved slug ───────
   const jobs = [];
   const linkRegex = new RegExp(
-    `href="((?:https://jobs\\.polymer\\.co)?/${companySlug}/[\\w-]+)"[^>]*>([\\s\\S]*?)<\\/a>`, 'gi'
+    `href="((?:https://jobs\\.polymer\\.co)?/${resolvedSlug}/[\\w-]+)"[^>]*>([\\s\\S]*?)<\\/a>`, 'gi'
   );
   let match;
   while ((match = linkRegex.exec(html)) !== null) {
@@ -237,12 +273,22 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   }
 
   if (jobs.length === 0 && html.length > 0) {
-    // Got HTML but couldn't find jobs — surface a diagnostic hint
     const hasNextData = html.includes('__NEXT_DATA__');
+    // Include raw API sample in the error to help diagnose format mismatches
+    const apiSample = (() => {
+      try {
+        const r = jobs._rawSample || null;
+        if (!r) return '(API returned null/error)';
+        const s = JSON.stringify(r);
+        return s.length > 300 ? s.slice(0, 300) + '…' : s;
+      } catch (_) { return '(serialize error)'; }
+    })();
     throw new Error(
-      `Polymer: got HTML for "${companyName}" (${baseUrl}) but found no job links. ` +
+      `Polymer: no jobs found for "${companyName}". ` +
+      `Input slug: ${inputSlug}, resolved slug: ${resolvedSlug}. ` +
       `__NEXT_DATA__ present: ${hasNextData}. ` +
-      `HTML snippet: ${html.slice(0, 200)}`
+      `API sample: ${apiSample}. ` +
+      `HTML preview: ${html.slice(0, 200)}`
     );
   }
 
