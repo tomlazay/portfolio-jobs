@@ -77,7 +77,7 @@ async function fetchJobs() {
     // Update hero stats
     const companyCount = document.getElementById('company-count');
     const totalCount   = document.getElementById('total-count');
-    if (companyCount) companyCount.textContent = (data.companies || []).length || new Set(ALL_JOBS.map(j => j.company)).size;
+    if (companyCount) companyCount.textContent = new Set(ALL_JOBS.map(j => j.company)).size;
     if (totalCount)   totalCount.textContent   = ALL_JOBS.length;
 
     // Populate footer "Last Updated" timestamp
