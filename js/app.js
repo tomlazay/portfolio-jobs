@@ -180,6 +180,11 @@ const LOCATION_ALIASES = {
   'bronx':                 'New York, NY',
   'the bronx':             'New York, NY',
   'staten island':         'New York, NY',
+  // Boston metro area
+  'somerville':            'Boston, MA',
+  'somerville, ma':        'Boston, MA',
+  'cambridge':             'Boston, MA',
+  'cambridge, ma':         'Boston, MA',
 };
 
 function normalizeLocation(raw) {
