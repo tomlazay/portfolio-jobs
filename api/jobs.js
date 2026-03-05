@@ -137,52 +137,52 @@ async function fetchCompanies() {
 //   footerText   — footer copyright    (e.g. "Copyright 2026 My Firm LLC")
 // Returns {} silently if the tab is missing, empty, or can't be parsed.
 async function fetchConfig() {
-  // ── Step 1: Discover the Config tab's GID from the pubhtml index ───────
+  // ── Step 1: Collect all sheet GIDs from the pubhtml index ──────────────
   // Google assigns GIDs arbitrarily on tab creation (NOT sequential: 0, 1, 2…).
-  // We fetch the published sheet's HTML to find which GID belongs to "Config".
-  let configGid = null;
+  // We fetch the pubhtml to extract the numeric GID list — tab names are NOT
+  // reliably present in unauthenticated pubhtml, but GID numbers always are.
+  let allGids = [];
   try {
-    // Convert pub CSV URL → pubhtml index URL (strips gid/single/output params)
     const pubHtmlUrl = SHEET_CSV_URL.replace(/\/pub(\?.*)?$/, '/pubhtml');
     const htmlRes = await fetch(pubHtmlUrl, { redirect: 'follow' });
     if (htmlRes.ok) {
       const html = await htmlRes.text();
-      // Sheets pubhtml does NOT use <a href="#gid=..."> links for tab navigation.
-      // Instead it uses <td class="switcherItem">TabName</td> with no GID attribute.
-      // GIDs and tab names both appear in positional order in the HTML, so we can
-      // zip them by index to find the GID for the "Config" tab.
-      //
-      // Extract unique GIDs in order of first appearance:
-      const gids = [...new Set([...html.matchAll(/gid[=:"'\s]+(\d+)/gi)].map(m => m[1]))];
-      // Extract tab names in DOM order (switcherItemActive = current tab, switcherItem = others):
-      const tabNames = [...html.matchAll(/class="switcher(?:ItemActive|Item)">([^<]+)</gi)].map(m => m[1].trim());
-      // Zip by position to find which GID belongs to "Config"
-      const configIdx = tabNames.findIndex(n => n.toLowerCase() === 'config');
-      if (configIdx !== -1 && gids[configIdx]) configGid = gids[configIdx];
+      // GIDs appear as gid=NNNN or gid:"NNNN" in both authenticated and
+      // unauthenticated pubhtml. Deduplicate, preserving first-appearance order.
+      allGids = [...new Set([...html.matchAll(/gid[=:"'\s]+(\d+)/gi)].map(m => m[1]))];
     }
-  } catch (_) { /* fall through to fallback */ }
+  } catch (_) { /* fall through */ }
 
-  // If auto-discovery fails (export-format URL, network issue, etc.), fall back to gid=1
-  if (!configGid) configGid = '1';
+  // ── Step 2: Find Config tab by probing each non-main-sheet GID ─────────
+  // Skip the main sheet GID (already known from SHEET_CSV_URL).
+  // Try each remaining GID: fetch its CSV and look for "key"+"value" headers,
+  // which uniquely identify the Config tab. No tab-name parsing needed.
+  const mainGid = (SHEET_CSV_URL.match(/[?&]gid=(\d+)/) || [])[1] || '0';
+  const candidates = allGids.filter(g => g !== mainGid);
+  if (!candidates.includes('1')) candidates.push('1'); // fallback for export-format URLs
 
-  // ── Step 2: Build the Config tab CSV URL and fetch it ─────────────────
-  const configUrl = /[?&]gid=\d+/.test(SHEET_CSV_URL)
-    ? SHEET_CSV_URL.replace(/gid=\d+/, `gid=${configGid}`)
-    : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + `gid=${configGid}`;
-  try {
-    const res = await fetch(configUrl, { redirect: 'follow' });
-    if (!res.ok) return {};
-    const csv = await res.text();
-    const config = {};
-    csv.trim().split('\n').slice(1).forEach(line => {
-      const cols = (line.match(/(\".*?\"|[^,]+)/g) || [])
-        .map(c => c.replace(/^\"|\"$/g, '').trim());
-      if (cols[0] && cols[1]) config[cols[0]] = cols[1];
-    });
-    return config;
-  } catch (_) {
-    return {};
+  for (const gid of candidates) {
+    const url = /[?&]gid=\d+/.test(SHEET_CSV_URL)
+      ? SHEET_CSV_URL.replace(/gid=\d+/, `gid=${gid}`)
+      : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + `gid=${gid}`;
+    try {
+      const res = await fetch(url, { redirect: 'follow' });
+      if (!res.ok) continue;
+      const csv = await res.text();
+      const header = csv.trim().split('\n')[0]?.toLowerCase() || '';
+      // Config tab is identified by having both "key" and "value" column headers
+      if (!header.includes('key') || !header.includes('value')) continue;
+      const config = {};
+      csv.trim().split('\n').slice(1).forEach(line => {
+        const cols = (line.match(/(\".*?\"|[^,]+)/g) || [])
+          .map(c => c.replace(/^\"|\"$/g, '').trim());
+        if (cols[0] && cols[1]) config[cols[0]] = cols[1];
+      });
+      return config;
+    } catch (_) { continue; }
   }
+
+  return {};
 }
 
 // ── Derive logo URLs for a company ────────────────────────────
