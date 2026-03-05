@@ -3,71 +3,13 @@
    Jobs are now fetched live from /api/jobs (Vercel function).
    ============================================================ */
 
-// ── Company logo / badge config ───────────────────────────────
-// Add an entry here for each new company to set its logo + badge colour.
-// If a company has no entry, a text fallback is shown automatically.
-const COMPANY_CONFIG = {
-  POSH: {
-    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/06fc6f03-fc47-4801-9d96-04d7db0270de/42c725d4-e44d-40f6-9169-1f662c6e8dc3/81d4c492-920a-4150-888f-ddf264037875.png',
-    logoClass: 'logo-posh',
-  },
-  North: {
-    logoUrl:   '/logos/north-logo.svg',
-    logoClass: 'logo-north',
-  },
-  Sent: {
-    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/776013c9-4de4-4cdd-b5a7-0ab17b9791d8/d3fbe472-82d1-4fc9-9c37-5322c55db2f8/76cbf1d4-20f2-4898-acd8-d37de9156af1.png',
-    logoClass: 'logo-sent',
-  },
-  Cyvl: {
-    logoUrl:   'https://app.ashbyhq.com/api/images/org-theme-wordmark/9467653c-17ee-4657-ab6a-7e00dffbd287/2b05a9c8-159b-4e81-acb0-b1b54e0fa478/5f1f21e6-6abf-4d28-aec5-718b2d77c480.png',
-    logoClass: 'logo-cyvl',
-  },
-  Flex: {
-    logoUrl:   'https://lever-client-logos.s3.us-west-2.amazonaws.com/5015e948-36ab-4fc9-9aa4-6a006728f2e2-1693924947628.png',
-    logoClass: 'logo-flex',
-  },
-  Daylit: {
-    logoUrl:   'https://inflow-public.s3.amazonaws.com/company-logos/rpir2q831nuncesanw4cbmy1geyv.png',
-    logoClass: 'logo-daylit',
-  },
-  Allstacks: {
-    logoUrl:   'https://storage.googleapis.com/dover-django/client-logos/d0146d97-c838-4200-8596-7ebd43c29d73-1724783651-logo',
-    logoClass: 'logo-allstacks',
-  },
-  RoadSync: {
-    logoUrl:   'https://roadsync.com/wp-content/themes/roadsyncwp/assets/img/logo-white.svg',
-    logoClass: 'logo-roadsync',
-  },
-  Ziflow: {
-    logoUrl:   'https://www.ziflow.com/hubfs/Ziflow%20logo%20-%20let%20your%20content%20flow.svg',
-    logoClass: 'logo-ziflow',
-  },
-  Fullcast: {
-    logoUrl:   'https://www.fullcast.com/wp-content/uploads/2025/01/Fullcast-logo-white.svg',
-    logoClass: 'logo-fullcast',
-  },
-  Arpio: {
-    logoUrl:   'https://arpio.io/wp-content/uploads/2022/09/arpio-logo.svg',
-    logoClass: 'logo-arpio',
-  },
-  Apty: {
-    logoUrl:   'https://apty.ai/wp-content/uploads/2025/03/logo.svg',
-    logoClass: 'logo-apty',
-  },
-  ENDVR: {
-    logoUrl:   'https://endvr.io/assets/endvr-logo-B8qymlBx.webp',
-    logoClass: 'logo-endvr',
-  },
-};
-
 // ── App state ─────────────────────────────────────────────────
 let ALL_JOBS = [];
 
 // ── Client-side job cache (localStorage) ─────────────────────
 // Renders cached jobs instantly, then refreshes in the background.
 // TTL: 5 minutes. Cache is keyed so a new deploy busts it automatically.
-const CACHE_KEY = 'companyon_jobs_v1';
+const CACHE_KEY = 'portfolio_jobs_cache_v1';
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in ms
 
 function cacheLoad() {
@@ -85,8 +27,33 @@ function cacheSave(data) {
   catch (_) { /* storage full or private-browsing — silently skip */ }
 }
 
+// ── Apply site config from API response ──────────────────────
+// Reads the `config` object returned by the API (sourced from the Google
+// Sheet config tab) and populates page title, hero copy, and footer text.
+// Falls back silently to whatever is in the HTML if a key is absent.
+function applyConfig(config) {
+  if (!config) return;
+
+  if (config.siteTitle) document.title = config.siteTitle;
+
+  const heroEl = document.getElementById('hero-headline');
+  if (heroEl && config.heroHeadline) {
+    // Highlight the last word of the headline with the brand <span> (as in the HTML default)
+    const words = config.heroHeadline.trim().split(' ');
+    const last  = words.pop();
+    heroEl.innerHTML = words.length ? `${words.join(' ')} <span>${last}</span>` : `<span>${last}</span>`;
+  }
+
+  const subtextEl = document.getElementById('hero-subtext');
+  if (subtextEl && config.heroSubtext) subtextEl.textContent = config.heroSubtext;
+
+  const footerEl = document.getElementById('footer-copy');
+  if (footerEl && config.footerText) footerEl.textContent = config.footerText;
+}
+
 function applyJobData(data) {
   ALL_JOBS = normalizeJobs(data.jobs || []);
+  applyConfig(data.config);
 
   const companyCount = document.getElementById('company-count');
   const totalCount   = document.getElementById('total-count');
@@ -347,6 +314,18 @@ function syncUrlParams() {
   history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
 }
 
+// ── Logo fallback ─────────────────────────────────────────────
+// Called by onerror on company logo <img> elements.
+// Swaps to the text-initial badge if the image fails to load
+// (e.g. Clearbit doesn't have a logo for this domain yet).
+function logoFallback(img) {
+  const wrap = img.parentElement;
+  if (!wrap) return;
+  wrap.className = 'company-logo-wrap logo-text';
+  const initial = (img.alt || '?').charAt(0).toUpperCase();
+  wrap.innerHTML = `<span class="logo-text-fallback">${initial}</span>`;
+}
+
 // ── Render ────────────────────────────────────────────────────
 function renderJobs(jobs) {
   showLoading(false);
@@ -381,16 +360,17 @@ function renderJobs(jobs) {
     const equityHTML = job.equity
       ? `<div class="job-comp-equity">Offers equity</div>` : '';
 
-    const cfg       = COMPANY_CONFIG[job.company] || {};
-    const logoUrl   = cfg.logoUrl   || '';
-    const logoClass = cfg.logoClass || 'logo-default';
+    // Logo: use the URL from the API response (Clearbit or platform API).
+    // If missing or broken, logoFallback() swaps in the initial-letter badge.
+    const logoUrl    = job.logoUrl || '';
+    const badgeClass = logoUrl ? 'logo-img' : 'logo-text';
 
     const logoInner = logoUrl
-      ? `<img class="company-logo-img" src="${logoUrl}" alt="${job.company}" loading="lazy">`
-      : `<span class="logo-text-fallback">${job.company.charAt(0)}</span>`;
+      ? `<img class="company-logo-img" src="${logoUrl}" alt="${job.company}" loading="lazy" onerror="logoFallback(this)">`
+      : `<span class="logo-text-fallback">${job.company.charAt(0).toUpperCase()}</span>`;
 
     card.innerHTML = `
-      <div class="company-logo-wrap ${logoClass}">
+      <div class="company-logo-wrap ${badgeClass}">
         ${logoInner}
       </div>
       <div class="job-info">

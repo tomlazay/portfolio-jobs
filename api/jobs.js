@@ -28,7 +28,13 @@
 // This is required for outbound fetch() to originate from Cloudflare IPs.
 export const config = { runtime: 'edge' };
 
+// ── Configuration ────────────────────────────────────────────
+// Set SHEET_CSV_URL as a Vercel environment variable pointing to your
+// Google Sheet's "Published to web" CSV export URL (gid=0, companies tab).
+// A hardcoded fallback is kept here so existing CompanyOn deploys continue
+// working without touching Vercel settings.  See SETUP.md for instructions.
 const SHEET_CSV_URL =
+  process.env.SHEET_CSV_URL ||
   'https://docs.google.com/spreadsheets/d/1xWYzNKkfUYV18CL7DpX_Q_HstHuJR6-i76Jqxd9cRXs/export?format=csv&gid=0';
 
 // Ashby employmentType → display label
@@ -71,22 +77,95 @@ const SCRAPE_HEADERS = {
 };
 
 // ── Fetch company list from Google Sheet ─────────────────────
+// Parses all columns by header name (case-insensitive), so new columns
+// can be added to the sheet without code changes.
+// Required columns : name, url
+// Optional columns : homepageUrl  (company website; used for Clearbit logo lookup)
+//                                 e.g. https://posh.com — NOT the ATS job board URL
 async function fetchCompanies() {
   const res = await fetch(SHEET_CSV_URL, { redirect: 'follow' });
   if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
   const csv = await res.text();
 
-  return csv
-    .trim()
-    .split('\n')
-    .slice(1)
+  const lines = csv.trim().split('\n');
+  const parseRow = line => (line.match(/(\".*?\"|[^,]+)/g) || [])
+    .map(c => c.replace(/^\"|\"$/g, '').trim());
+
+  // Normalise header names: lowercase, strip spaces/underscores
+  const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/[\s_-]+/g, ''));
+
+  const get = (cols, ...keys) => {
+    for (const k of keys) {
+      const i = headers.indexOf(k);
+      if (i >= 0 && cols[i]) return cols[i];
+    }
+    return '';
+  };
+
+  return lines.slice(1)
     .map(line => {
-      const cols = line.match(/(\".*?\"|[^,]+)/g) || [];
-      const name = (cols[0] || '').replace(/^\"|\"$/g, '').trim();
-      const url  = (cols[1] || '').replace(/^\"|\"$/g, '').trim();
-      return name && url ? { name, url } : null;
+      const cols = parseRow(line);
+      const name = get(cols, 'name');
+      const url  = get(cols, 'url');
+      if (!name || !url) return null;
+      return {
+        name,
+        url,
+        homepageUrl: get(cols, 'homepageurl', 'homepage', 'website'),
+      };
     })
     .filter(Boolean);
+}
+
+// ── Fetch site config from Google Sheet (second tab, gid=1) ──
+// The config tab must have two columns: "key" and "value".
+// Supported keys:
+//   siteTitle    — browser tab title  (e.g. "Portfolio Careers | My Firm")
+//   heroHeadline — page main heading   (e.g. "Jobs in Our Portfolio")
+//   heroSubtext  — page sub-heading    (e.g. "Explore open roles across our portfolio")
+//   footerText   — footer copyright    (e.g. "Copyright 2026 My Firm LLC")
+// Returns {} silently if the tab is missing, empty, or can't be parsed.
+async function fetchConfig() {
+  const configUrl = SHEET_CSV_URL.replace(/gid=\d+/, 'gid=1');
+  try {
+    const res = await fetch(configUrl, { redirect: 'follow' });
+    if (!res.ok) return {};
+    const csv = await res.text();
+    const config = {};
+    csv.trim().split('\n').slice(1).forEach(line => {
+      const cols = (line.match(/(\".*?\"|[^,]+)/g) || [])
+        .map(c => c.replace(/^\"|\"$/g, '').trim());
+      if (cols[0] && cols[1]) config[cols[0]] = cols[1];
+    });
+    return config;
+  } catch (_) {
+    return {};
+  }
+}
+
+// ── Derive Clearbit logo URL for a company ────────────────────
+// Priority:
+//   1. homepageUrl column in Google Sheet → Clearbit by domain (explicit, most reliable)
+//   2. Job board URL itself, when it is a custom domain (not an ATS subdomain)
+// ATS-hosted boards (Ashby, Lever, Polymer, etc.) can't be used for this —
+// fill in the homepageUrl column for those companies.
+// Ashby/Lever fetchers may also set logoUrl directly from their API responses.
+const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai/;
+
+function deriveLogoUrl(company) {
+  // 1. Explicit homepageUrl from sheet
+  const homeUrl = (company.homepageUrl || '').trim();
+  if (homeUrl) {
+    const domain = homeUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+    if (domain) return `https://logo.clearbit.com/${domain}`;
+  }
+  // 2. For custom-page companies, derive from the job board URL itself
+  const url = (company.url || '').trim();
+  if (url && !ATS_DOMAINS.test(url)) {
+    const domain = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+    if (domain) return `https://logo.clearbit.com/${domain}`;
+  }
+  return '';
 }
 
 // ── Ashby ─────────────────────────────────────────────────────
@@ -96,6 +175,11 @@ async function fetchAshbyJobs(handle, companyName) {
   const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${handle}?includeCompensation=true`);
   if (!res.ok) throw new Error(`Ashby fetch failed for "${handle}": ${res.status}`);
   const data = await res.json();
+
+  // Ashby may return an org-level logo in the response. Try common paths.
+  // If not present, handler will fall back to Clearbit via homepageUrl column.
+  const ashbyLogo = data.logoUrl || data.jobBoard?.logoUrl
+                 || data.jobBoard?.logoWordmarkUrl || data.organization?.logoUrl || '';
 
   return (data.jobs || []).map(job => {
     // Only surface compensation when the company opted in to displaying it.
@@ -124,6 +208,7 @@ async function fetchAshbyJobs(handle, companyName) {
       compensation: formatSalary(rawComp),
       equity:       hasEquity,
       url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
+      logoUrl:      ashbyLogo,   // handler fills in Clearbit fallback if empty
     };
   });
 }
@@ -154,6 +239,7 @@ async function fetchLeverJobs(handle, companyName) {
       compensation: comp,
       equity:       false,
       url:          job.hostedUrl || `https://jobs.lever.co/${handle}`,
+      logoUrl:      '',   // handler fills in Clearbit via homepageUrl
     };
   });
 }
@@ -219,6 +305,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
           equity:       false,
           url:          job.url || job.apply_url || job.applyUrl
                         || (job.id ? `https://jobs.polymer.co/${slug}/${job.id}` : ''),
+          logoUrl:      '',
         }))
       );
 
@@ -291,6 +378,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
           equity:       false,
           url:          job.url || job.apply_url || job.applyUrl
                         || (job.id ? `https://jobs.polymer.co/${resolvedSlug}/${job.id}` : ''),
+          logoUrl:      '',
         }));
       }
     } catch (_) { /* fall through */ }
@@ -342,6 +430,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
       compensation: salarySnip ? formatSalary(salarySnip) : '',
       equity:       false,
       url:          jobUrl,
+      logoUrl:      '',
     });
   }
 
@@ -386,6 +475,7 @@ async function fetchDoverJobs(handle, companyName) {
       equity:       false,
       url:          urlOverride || job.url || job.apply_url
                     || (job.id ? `${pageUrl}/${job.id}` : pageUrl),
+      logoUrl:      '',
     };
   }
 
@@ -578,6 +668,7 @@ async function fetchTeamtailorJobs(pageUrl, companyName) {
       compensation: '',
       equity:       false,
       url:          href,   // already absolute
+      logoUrl:      '',
     });
   }
 
@@ -649,6 +740,7 @@ async function fetchRipplingJobs(boardSlug, companyName) {
       compensation: formatSalary(comp),
       equity:       false,
       url:          job.url || `https://ats.rippling.com/${boardSlug}/jobs/${job.id}`,
+      logoUrl:      '',
     };
   });
 }
@@ -680,6 +772,7 @@ async function fetchBreezyJobs(handle, companyName) {
       compensation: job.salary || '',
       equity:       false,
       url:          job.url || `https://${handle}.breezy.hr`,
+      logoUrl:      '',
     };
   });
 }
@@ -750,6 +843,7 @@ async function fetchCustomJobs(pageUrl, companyName) {
         compensation: '',
         equity:       false,
         url:          jobUrl,
+        logoUrl:      '',   // derived from page domain by deriveLogoUrl() in handler
       });
     }
   }
@@ -795,12 +889,27 @@ async function fetchCustomJobs(pageUrl, companyName) {
 }
 
 // ── micro1.ai ─────────────────────────────────────────────────
-// micro1 is a contractor staffing platform. The API returns all jobs
-// (client postings + micro1's own "Core team" internal hiring).
-// We filter for micro1's own roles using is_micro1_account === true,
-// with a tag-name fallback in case the flag behaves differently.
+// micro1 is a contractor staffing platform with two distinct job types:
+//   1. "Core team" jobs — micro1's own internal full-time hiring
+//   2. Client/contractor postings — marketplace jobs placed by client companies
+//
+// ── FILTER BEHAVIOR (how to customise) ──────────────────────
+// This function currently returns ONLY Core team jobs (micro1's own hiring).
+// This is appropriate when micro1 is a portfolio company and you want to
+// surface its direct employment opportunities — not the contractor marketplace.
+//
+// To return ALL jobs (client + contractor + Core team):
+//   Remove the `if (!isCoreTeam) continue;` line below.
+//
+// To return only contractor/client postings (not micro1's own hiring):
+//   Change the condition to `if (isCoreTeam) continue;`
+//
+// The `inferDepartmentFromTitle()` helper below is used because micro1 does
+// not expose a structured department field on Core team roles.
+//
 // API endpoint: https://prod-api.micro1.ai/api/v1/job/portal (POST)
 // Individual posting pages: https://jobs.micro1.ai/post/{UUID}
+//
 // Infer a department string from a job title for platforms (e.g. micro1)
 // that don't expose a structured department field.
 // Returns a department string matching the site's filter tags, or '' if unknown.
@@ -971,6 +1080,7 @@ async function fetchMicro1Jobs(companyName) {
         compensation: formatSalary(rawComp),
         equity:       false,
         url:          jobUrl,
+        logoUrl:      '',   // handler fills in Clearbit via homepageUrl
       });
     }
 
@@ -1086,7 +1196,8 @@ export default async function handler(req) {
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: HEADERS });
 
   try {
-    const companies = await fetchCompanies();
+    // Fetch company list and site config in parallel (both are fast CSV fetches).
+    const [companies, config] = await Promise.all([fetchCompanies(), fetchConfig()]);
 
     // Fetch all companies IN PARALLEL — dramatically faster than the old
     // sequential for-await loop (total time ≈ slowest single fetch, not sum).
@@ -1139,6 +1250,13 @@ export default async function handler(req) {
     const errors  = [];
     results.forEach((result, i) => {
       if (result.status === 'fulfilled') {
+        const company = companies[i];
+        // Apply logo URL to each job: prefer what the platform API already set,
+        // fall back to Clearbit (derived from homepageUrl or custom page domain).
+        const fallbackLogo = deriveLogoUrl(company);
+        result.value.forEach(job => {
+          if (!job.logoUrl) job.logoUrl = fallbackLogo;
+        });
         allJobs.push(...result.value);
       } else {
         const { name, url } = companies[i];
@@ -1151,6 +1269,7 @@ export default async function handler(req) {
       JSON.stringify({
         jobs:      allJobs,
         companies: companies.map(c => c.name),
+        config,      // site config from Google Sheet config tab (gid=1)
         errors,
         fetchedAt: new Date().toISOString(),
       }),
