@@ -145,9 +145,10 @@ async function fetchConfig() {
   }
 }
 
-// ── Derive Clearbit logo URL for a company ────────────────────
+// ── Derive logo URL for a company ─────────────────────────────
+// Uses Google's Favicon API (free, no key, always returns an image).
 // Priority:
-//   1. homepageUrl column in Google Sheet → Clearbit by domain (explicit, most reliable)
+//   1. homepageUrl column in Google Sheet → logo by domain (explicit, most reliable)
 //   2. Job board URL itself, when it is a custom domain (not an ATS subdomain)
 // ATS-hosted boards (Ashby, Lever, Polymer, etc.) can't be used for this —
 // fill in the homepageUrl column for those companies.
@@ -159,13 +160,13 @@ function deriveLogoUrl(company) {
   const homeUrl = (company.homepageUrl || '').trim();
   if (homeUrl) {
     const domain = homeUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
-    if (domain) return `https://logo.clearbit.com/${domain}`;
+    if (domain) return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
   }
   // 2. For custom-page companies, derive from the job board URL itself
   const url = (company.url || '').trim();
   if (url && !ATS_DOMAINS.test(url)) {
     const domain = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
-    if (domain) return `https://logo.clearbit.com/${domain}`;
+    if (domain) return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
   }
   return '';
 }
@@ -1254,7 +1255,7 @@ export default async function handler(req) {
       if (result.status === 'fulfilled') {
         const company = companies[i];
         // Apply logo URL to each job: prefer what the platform API already set,
-        // fall back to Clearbit (derived from homepageUrl or custom page domain).
+        // fall back to Google Favicons (derived from homepageUrl or custom page domain).
         const fallbackLogo = deriveLogoUrl(company);
         result.value.forEach(job => {
           if (!job.logoUrl) job.logoUrl = fallbackLogo;
