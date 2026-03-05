@@ -1349,6 +1349,14 @@ async function fetchNotionJobs(boardUrl, companyName) {
 
     // Ordered list of job page block IDs returned by the reducer
     const blockIds = qcData.result?.reducerResults?.collection_group_results?.blockIds || [];
+    const rmBlockKeys = Object.keys(qcRm.block || {}).length;
+
+    // Diagnostic: if we got blockIds but the recordMap has no blocks, the
+    // server-side response is stripped — surface this so it appears in errors[].
+    if (blockIds.length > 0 && rmBlockKeys === 0) {
+      throw new Error(`Notion: queryCollection returned ${blockIds.length} blockIds but recordMap.block is empty for ${companyName} (collection ${collectionId})`);
+    }
+
     const sectionJobs = [];
 
     for (const blockId of blockIds) {
@@ -1391,7 +1399,18 @@ async function fetchNotionJobs(boardUrl, companyName) {
     throw rejected[0].reason;
   }
 
-  return fulfilled.flatMap(r => r.value);
+  const allJobs = fulfilled.flatMap(r => r.value);
+
+  // Diagnostic: fulfilled but zero jobs — explain why by summarising each section
+  if (allJobs.length === 0) {
+    const summary = collectionResults.map((r, i) => {
+      if (r.status === 'rejected') return `sect${i}:err(${r.reason?.message?.slice(0,60)})`;
+      return `sect${i}:${r.value.length}jobs`;
+    }).join(', ');
+    throw new Error(`Notion: 0 open jobs for ${companyName} — ${summary}`);
+  }
+
+  return allJobs;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
