@@ -79,7 +79,8 @@ const SCRAPE_HEADERS = {
 // ── Fetch company list from Google Sheet ─────────────────────
 // Parses all columns by header name (case-insensitive), so new columns
 // can be added to the sheet without code changes.
-// Required columns : name, url
+// Required columns : name  (or: company)
+//                    url   (or: jobspagesource, jobspage, jobsurl, jobboardurl, boardurl)
 // Optional columns : homepageUrl  (company website; used for Clearbit logo lookup)
 //                                 e.g. https://posh.com — NOT the ATS job board URL
 async function fetchCompanies() {
@@ -91,7 +92,7 @@ async function fetchCompanies() {
   const parseRow = line => (line.match(/(\".*?\"|[^,]+)/g) || [])
     .map(c => c.replace(/^\"|\"$/g, '').trim());
 
-  // Normalise header names: lowercase, strip spaces/underscores
+  // Normalise header names: lowercase, strip spaces/underscores/hyphens
   const headers = parseRow(lines[0]).map(h => h.toLowerCase().replace(/[\s_-]+/g, ''));
 
   const get = (cols, ...keys) => {
@@ -105,8 +106,9 @@ async function fetchCompanies() {
   return lines.slice(1)
     .map(line => {
       const cols = parseRow(line);
-      const name = get(cols, 'name');
-      const url  = get(cols, 'url');
+      // Accept common alternate header names so forks don't need to rename columns
+      const name = get(cols, 'name', 'company');
+      const url  = get(cols, 'url', 'jobspagesource', 'jobspage', 'jobsurl', 'jobboardurl', 'boardurl');
       if (!name || !url) return null;
       return {
         name,
