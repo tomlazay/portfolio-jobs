@@ -18,6 +18,9 @@
 //   - Rippling   (ats.rippling.com/.../{board-slug}/jobs)
 //   - micro1.ai  (www.micro1.ai/jobs — Next.js SPA; tries __NEXT_DATA__,
 //                 public API, then static link scraping as fallback)
+//   - Notion     ({workspace}.notion.site/{page} — uses Notion's internal
+//                 loadCachedPageChunkV2 + queryCollection APIs; no auth required
+//                 for public pages; filters to Status === "Open" automatically)
 //   - Custom     (any other URL — scrapes /open-roles/ or /about/careers/
 //                 links; auto-detects embedded Rippling or Breezy widgets)
 //
@@ -159,7 +162,7 @@ async function fetchConfig() {
 //      Google Favicons API — always returns something, even for obscure domains.
 // ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo domain derivation —
 // fill in homepageUrl for those companies so structured logo sources can be fetched.
-const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai/;
+const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai|notion\.site|notion\.so/;
 
 function getLogoDomain(company) {
   const homeUrl = (company.homepageUrl || '').trim();
@@ -1223,6 +1226,166 @@ async function fetchMicro1Jobs(companyName) {
   return allJobs;
 }
 
+// ── Notion ────────────────────────────────────────────────────
+// Notion job boards are client-side rendered — the 15KB HTML shell contains
+// no job data. Instead we use Notion's internal API (the same endpoints the
+// browser calls), which works for public pages without any auth token.
+//
+// Flow:
+//   1. POST loadCachedPageChunkV2  → get block tree → find all
+//      collection_view blocks (one per department section on the board).
+//   2. POST queryCollection (reducer format) for each collection →
+//      returns job page blocks with all custom properties.
+//   3. Parse title, Status, Location, Employment from block properties.
+//   4. Filter to Status === "Open" (skip Closed roles automatically).
+//   5. Build job URL: https://{domain}/{title-slug}-{blockId-no-hyphens}
+//
+// Block data is double-nested in the recordMap:
+//   rm.block[id].value.value  →  the actual block object
+//   rm.collection[id].value.value  →  the actual collection object
+async function fetchNotionJobs(boardUrl, companyName) {
+  const urlObj = new URL(boardUrl);
+  const domain = urlObj.hostname; // e.g. "knowify.notion.site"
+
+  // Extract raw 32-hex page ID from the URL path
+  const rawId = boardUrl.match(/([0-9a-f]{32})(?:[?#]|$)/i)?.[1];
+  if (!rawId) throw new Error(`Notion: cannot extract page ID from URL: ${boardUrl}`);
+
+  // Notion's internal API requires the hyphenated UUID format
+  const pageId = [rawId.slice(0,8), rawId.slice(8,12), rawId.slice(12,16), rawId.slice(16,20), rawId.slice(20)].join('-');
+
+  const apiBase = `https://${domain}/api/v3`;
+  const hdrs = {
+    'Content-Type': 'application/json',
+    'User-Agent':   'Mozilla/5.0 (compatible; portfolio-jobs-bot/1.0)',
+  };
+
+  // Helper: unwrap the double-nested Notion recordMap entry
+  // New Notion API wraps values as { value: { value: block, role } }
+  const unwrap = entry => entry?.value?.value ?? entry?.value ?? null;
+
+  // Step 1: load page block tree to discover all collection_view blocks
+  const chunkRes = await fetch(`${apiBase}/loadCachedPageChunkV2`, {
+    method: 'POST',
+    headers: hdrs,
+    body: JSON.stringify({
+      pageId,
+      limit: 100,
+      cursor: { stack: [] },
+      chunkNumber: 0,
+      verticalColumns: false,
+    }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!chunkRes.ok) throw new Error(`Notion loadCachedPageChunkV2 HTTP ${chunkRes.status} for ${companyName}`);
+  const chunkData = await chunkRes.json();
+  const rm = chunkData.recordMap || {};
+
+  // Find every collection_view block (each represents one department section)
+  const cvBlocks = Object.entries(rm.block || {})
+    .map(([id, entry]) => ({ id, block: unwrap(entry) }))
+    .filter(({ block }) => block?.type === 'collection_view' && block.collection_id);
+
+  if (cvBlocks.length === 0) return [];
+
+  // Build collectionId → department name map from the page chunk
+  const deptNames = {};
+  for (const [collId, entry] of Object.entries(rm.collection || {})) {
+    const coll = unwrap(entry);
+    if (coll?.name) deptNames[collId] = coll.name[0]?.[0] || '';
+  }
+
+  // Step 2: query each collection for its job listings (in parallel)
+  const collectionResults = await Promise.allSettled(cvBlocks.map(async ({ block }) => {
+    const collectionId = block.collection_id;
+    const viewId = block.view_ids?.[0];
+    if (!viewId) return [];
+
+    const qcRes = await fetch(`${apiBase}/queryCollection`, {
+      method: 'POST',
+      headers: hdrs,
+      body: JSON.stringify({
+        collection:     { id: collectionId },
+        collectionView: { id: viewId },
+        query: { sort: [], filter: { operator: 'and', filters: [] }, aggregations: [] },
+        loader: {
+          type: 'reducer',
+          reducers: {
+            collection_group_results: {
+              type:        'results',
+              limit:       100,
+              searchQuery: '',
+              userTimeZone: 'America/New_York',
+            },
+          },
+          sort:        [],
+          searchQuery: '',
+          userTimeZone: 'America/New_York',
+        },
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!qcRes.ok) return [];
+
+    const qcData  = await qcRes.json();
+    const qcRm    = qcData.recordMap || {};
+    const dept    = deptNames[collectionId] || '';
+
+    // Get property schema for this collection (maps propId → { name, type })
+    const collVal = unwrap(qcRm.collection?.[collectionId]);
+    const schema  = collVal?.schema || {};
+
+    // Identify property IDs for the fields we care about
+    let statusKey = null, locationKey = null, employmentKey = null;
+    for (const [k, v] of Object.entries(schema)) {
+      const n = (v.name || '').toLowerCase();
+      if (n === 'status')     statusKey     = k;
+      if (n === 'location')   locationKey   = k;
+      if (n === 'employment') employmentKey = k;
+    }
+
+    // Ordered list of job page block IDs returned by the reducer
+    const blockIds = qcData.result?.reducerResults?.collection_group_results?.blockIds || [];
+    const sectionJobs = [];
+
+    for (const blockId of blockIds) {
+      const bVal = unwrap(qcRm.block?.[blockId]);
+      if (!bVal || bVal.type !== 'page') continue;
+
+      const props  = bVal.properties || {};
+      const title  = props.title?.[0]?.[0] || '';
+      if (!title) continue;
+
+      const status     = statusKey     ? (props[statusKey]?.[0]?.[0]     || '') : '';
+      const location   = locationKey   ? (props[locationKey]?.[0]?.[0]   || '') : '';
+      const employment = employmentKey ? (props[employmentKey]?.[0]?.[0] || '') : '';
+
+      // Only surface open roles
+      if (status && status.toLowerCase() !== 'open') continue;
+
+      // Build the job's permalink: {domain}/{title-slug}-{idNoHyphens}
+      const idNoHyphens = blockId.replace(/-/g, '');
+      const slug        = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const jobUrl      = `https://${domain}/${slug}-${idNoHyphens}`;
+
+      sectionJobs.push({
+        title,
+        department: dept,
+        location,
+        jobType: employment || 'Full-time',
+        url:     jobUrl,
+        companyName,
+      });
+    }
+    return sectionJobs;
+  }));
+
+  // Flatten all fulfilled results
+  return collectionResults
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value);
+}
+
 // ── Helpers ───────────────────────────────────────────────────
 
 // Scan a job-description HTML page for a "Compensation" section heading
@@ -1357,6 +1520,9 @@ export default async function handler(req) {
 
       } else if (/micro1\.ai/.test(url)) {
         return fetchMicro1Jobs(company.name);
+
+      } else if (/notion\.site\/|notion\.so\//.test(url)) {
+        return fetchNotionJobs(url, company.name);
 
       } else {
         // Generic custom page scraper (/open-roles/, /about/careers/, /careers/)
