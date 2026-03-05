@@ -9,9 +9,16 @@
 //  from each company's job board, and returns a unified list.
 //
 //  Supported platforms (auto-detected from URL):
-//   - Ashby      (jobs.ashbyhq.com/{handle})
-//   - Lever      (jobs.lever.co/{handle})
-//   - Polymer    (jobs.polymer.co/{company})
+//   - Ashby           (jobs.ashbyhq.com/{handle})
+//   - Lever           (jobs.lever.co/{handle})
+//   - Greenhouse      (boards.greenhouse.io/{handle} or job-boards.greenhouse.io/{handle})
+//   - Workable        (apply.workable.com/{handle})
+//   - SmartRecruiters (careers.smartrecruiters.com/{handle})
+//   - Recruitee       ({handle}.recruitee.com)
+//   - BambooHR        ({handle}.bamboohr.com)
+//   - Pinpoint        ({handle}.pinpointhq.com)
+//   - Workday         ({tenant}[.wdN].myworkdayjobs.com/[locale/]{board})
+//   - Polymer         (jobs.polymer.co/{company})
 //   - Dover      (app.dover.com/jobs/{handle})
 //   - Teamtailor ({company}.teamtailor.com)
 //   - Breezy HR  ({handle}.breezy.hr)
@@ -162,7 +169,7 @@ async function fetchConfig() {
 //      Google Favicons API — always returns something, even for obscure domains.
 // ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo domain derivation —
 // fill in homepageUrl for those companies so structured logo sources can be fetched.
-const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai|notion\.site|notion\.so/;
+const ATS_DOMAINS = /ashbyhq\.com|lever\.co|greenhouse\.io|workable\.com|smartrecruiters\.com|recruitee\.com|bamboohr\.com|pinpointhq\.com|myworkdayjobs\.com|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai|notion\.site|notion\.so/;
 
 function getLogoDomain(company) {
   const homeUrl = (company.homepageUrl || '').trim();
@@ -900,6 +907,300 @@ async function fetchBreezyJobs(handle, companyName) {
   });
 }
 
+// ── Greenhouse ────────────────────────────────────────────────
+// Greenhouse exposes a fully public REST API:
+//   GET https://boards-api.greenhouse.io/v1/boards/{handle}/jobs?content=true
+// The handle is the last path segment of the board URL:
+//   https://boards.greenhouse.io/stripe  →  handle = "stripe"
+//   https://job-boards.greenhouse.io/acme  →  handle = "acme"
+async function fetchGreenhouseJobs(handle, companyName) {
+  const url = `https://boards-api.greenhouse.io/v1/boards/${handle}/jobs?content=true`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`Greenhouse fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  return (data.jobs || []).map(job => {
+    const dept     = (job.departments || []).map(d => d.name).filter(Boolean).join(', ');
+    const loc      = job.location?.name || '';
+    // Greenhouse doesn't expose employment type or work-mode in the listing API
+    return {
+      company:      companyName,
+      title:        (job.title || '').trim(),
+      department:   dept,
+      location:     loc,
+      type:         'Full-time',
+      workMode:     /\bremote\b/i.test(loc) ? 'Remote' : '',
+      compensation: '',
+      equity:       false,
+      url:          job.absolute_url || `https://boards.greenhouse.io/${handle}`,
+      logoUrl:      '',
+    };
+  });
+}
+
+// ── Workable ──────────────────────────────────────────────────
+// Workable exposes a public JSON API via a POST request:
+//   POST https://apply.workable.com/api/v3/accounts/{handle}/jobs
+// The handle is the path segment after apply.workable.com:
+//   https://apply.workable.com/acme-corp  →  handle = "acme-corp"
+async function fetchWorkableJobs(handle, companyName) {
+  const url = `https://apply.workable.com/api/v3/accounts/${handle}/jobs`;
+  const res = await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({
+      query: '', location: [], department: [], worktype: [], remote: [],
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Workable fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  const WORKABLE_TYPE = {
+    full_time:  'Full-time',
+    part_time:  'Part-time',
+    contract:   'Contract',
+    internship: 'Internship',
+    other:      'Full-time',
+  };
+  const WORKABLE_MODE = {
+    wfo: 'On-site',
+    hybrid: 'Hybrid',
+    wfh: 'Remote',
+  };
+
+  return (data.results || []).map(job => ({
+    company:      companyName,
+    title:        (job.title || '').trim(),
+    department:   job.department || '',
+    location:     job.location?.city
+                    ? [job.location.city, job.location.country].filter(Boolean).join(', ')
+                    : (job.location?.country || ''),
+    type:         WORKABLE_TYPE[job.employment_type] || 'Full-time',
+    workMode:     WORKABLE_MODE[job.workplace?.workplace_type] || '',
+    compensation: '',
+    equity:       false,
+    url:          `https://apply.workable.com/${handle}/j/${job.shortcode}/`,
+    logoUrl:      '',
+  }));
+}
+
+// ── SmartRecruiters ───────────────────────────────────────────
+// SmartRecruiters has a public REST API:
+//   GET https://api.smartrecruiters.com/v1/companies/{handle}/postings
+// The handle is the path segment after careers.smartrecruiters.com:
+//   https://careers.smartrecruiters.com/AcmeCorp  →  handle = "AcmeCorp"
+async function fetchSmartRecruitersJobs(handle, companyName) {
+  const url = `https://api.smartrecruiters.com/v1/companies/${handle}/postings?limit=100`;
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`SmartRecruiters fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  const SR_TYPE = {
+    permanent:   'Full-time',
+    temporary:   'Contract',
+    contract:    'Contract',
+    parttime:    'Part-time',
+    internship:  'Internship',
+    freelance:   'Contract',
+  };
+
+  return (data.content || []).map(job => {
+    const city    = job.location?.city    || '';
+    const country = job.location?.country || '';
+    const loc     = [city, country].filter(Boolean).join(', ');
+    return {
+      company:      companyName,
+      title:        (job.name || '').trim(),
+      department:   job.department?.label || '',
+      location:     loc,
+      type:         SR_TYPE[job.typeOfEmployment?.id] || 'Full-time',
+      workMode:     job.location?.remote ? 'Remote' : '',
+      compensation: '',
+      equity:       false,
+      url:          `https://careers.smartrecruiters.com/${handle}/${job.id}`,
+      logoUrl:      '',
+    };
+  });
+}
+
+// ── Recruitee ─────────────────────────────────────────────────
+// Recruitee exposes a public JSON API at:
+//   GET https://{handle}.recruitee.com/api/offers/
+// The handle is the subdomain:
+//   https://acme.recruitee.com  →  handle = "acme"
+async function fetchRecruiteeJobs(handle, companyName) {
+  const url = `https://${handle}.recruitee.com/api/offers/`;
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Recruitee fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  return (data.offers || []).map(job => {
+    const loc = [job.city, job.country_code].filter(Boolean).join(', ');
+    return {
+      company:      companyName,
+      title:        (job.title || '').trim(),
+      department:   job.department || '',
+      location:     loc || job.location || '',
+      type:         job.employment_type_code === 'part_time' ? 'Part-time'
+                  : job.employment_type_code === 'contract'  ? 'Contract'
+                  : 'Full-time',
+      workMode:     job.remote ? 'Remote' : '',
+      compensation: '',
+      equity:       false,
+      url:          job.careers_url || `https://${handle}.recruitee.com/o/${job.slug}`,
+      logoUrl:      '',
+    };
+  });
+}
+
+// ── BambooHR ──────────────────────────────────────────────────
+// BambooHR exposes a public job listing endpoint at:
+//   GET https://{handle}.bamboohr.com/careers/list
+// The handle is the subdomain:
+//   https://acme.bamboohr.com/careers  →  handle = "acme"
+async function fetchBambooHRJobs(handle, companyName) {
+  const url = `https://${handle}.bamboohr.com/careers/list`;
+  const res = await fetch(url, {
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': SCRAPE_HEADERS['User-Agent'],
+    },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`BambooHR fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  return (data.result || []).map(job => ({
+    company:      companyName,
+    title:        (job.jobOpeningName || job.name || '').trim(),
+    department:   job.departmentLabel || job.department?.label || '',
+    location:     job.location?.city
+                    ? [job.location.city, job.location.state].filter(Boolean).join(', ')
+                    : (job.locationLabel || ''),
+    type:         job.employmentStatusLabel || 'Full-time',
+    workMode:     '',
+    compensation: '',
+    equity:       false,
+    url:          job.jobOpeningShareUrl
+                    || `https://${handle}.bamboohr.com/careers/${job.id}`,
+    logoUrl:      '',
+  }));
+}
+
+// ── Pinpoint ──────────────────────────────────────────────────
+// Pinpoint job boards are hosted at {handle}.pinpointhq.com.
+// The public JSON API endpoint is:
+//   GET https://{handle}.pinpointhq.com/api/v1/jobs
+// The handle is the subdomain:
+//   https://acme.pinpointhq.com  →  handle = "acme"
+async function fetchPinpointJobs(handle, companyName) {
+  const url = `https://${handle}.pinpointhq.com/api/v1/jobs`;
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Pinpoint fetch failed for "${companyName}" (${handle}): ${res.status}`);
+  const data = await res.json();
+
+  const jobs = Array.isArray(data) ? data : (data.data || data.jobs || []);
+  return jobs.map(job => {
+    const attrs = job.attributes || job;
+    const loc   = attrs.location || attrs.city || '';
+    return {
+      company:      companyName,
+      title:        (attrs.title || attrs.job_title || '').trim(),
+      department:   attrs.team?.title || attrs.department || '',
+      location:     loc,
+      type:         attrs.employment_type || 'Full-time',
+      workMode:     attrs.remote ? 'Remote' : '',
+      compensation: '',
+      equity:       false,
+      url:          attrs.apply_url
+                      || `https://${handle}.pinpointhq.com/jobs/${job.id || attrs.slug}`,
+      logoUrl:      '',
+    };
+  });
+}
+
+// ── Workday ───────────────────────────────────────────────────
+// Workday job boards are hosted at {tenant}.myworkdayjobs.com.
+// URL shapes (all equivalent):
+//   https://{tenant}.wd1.myworkdayjobs.com/en-US/{board}
+//   https://{tenant}.wd5.myworkdayjobs.com/{board}
+//   https://{tenant}.myworkdayjobs.com/{board}
+//
+// The internal JSON API accepts a POST to:
+//   https://{tenant}.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs
+// and returns paginated job postings. We fetch all pages up to 100 jobs.
+async function fetchWorkdayJobs(tenantUrl, companyName) {
+  // Normalise: strip wd[N]. subdomain variant and /en-XX/ locale prefix
+  // e.g. "acme.wd1.myworkdayjobs.com/en-US/AcmeCareers" → tenant="acme", board="AcmeCareers"
+  const urlObj   = new URL(tenantUrl);
+  const hostname = urlObj.hostname; // e.g. "acme.wd1.myworkdayjobs.com"
+  const tenant   = hostname.split('.')[0]; // "acme"
+
+  // Strip locale prefix (en-US, en-GB, …) from path segments
+  const pathParts = urlObj.pathname.replace(/^\//, '').split('/').filter(Boolean);
+  const board     = pathParts.find(p => !/^[a-z]{2}(-[A-Z]{2})?$/.test(p)) || pathParts[0];
+
+  if (!tenant || !board) {
+    throw new Error(`Workday: cannot parse tenant/board from URL: ${tenantUrl}`);
+  }
+
+  const apiBase = `https://${tenant}.myworkdayjobs.com/wday/cxs/${tenant}/${board}/jobs`;
+
+  const res = await fetch(apiBase, {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept':       'application/json',
+      ...SCRAPE_HEADERS,
+    },
+    body: JSON.stringify({
+      appliedFacets: {},
+      limit:         100,
+      offset:        0,
+      searchText:    '',
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Workday fetch failed for "${companyName}" (${tenant}/${board}): ${res.status}`);
+  const data = await res.json();
+
+  const WD_TYPE = {
+    'Full time':  'Full-time',
+    'Part time':  'Part-time',
+    'Contract':   'Contract',
+    'Temporary':  'Contract',
+    'Internship': 'Internship',
+  };
+
+  return (data.jobPostings || []).map(job => {
+    const loc = (job.locationsText || job.location || '').replace(/\s+/g, ' ').trim();
+    return {
+      company:      companyName,
+      title:        (job.title || '').trim(),
+      department:   job.jobFamilyGroup || '',
+      location:     loc,
+      type:         WD_TYPE[job.jobType] || 'Full-time',
+      workMode:     /\bremote\b/i.test(loc) ? 'Remote' : '',
+      compensation: '',
+      equity:       false,
+      url:          job.externalPath
+                      ? `https://${tenant}.myworkdayjobs.com${job.externalPath}`
+                      : tenantUrl,
+      logoUrl:      '',
+    };
+  });
+}
+
 // ── Custom careers page ───────────────────────────────────────
 // Supports:
 //   /open-roles/{slug}    (north.cloud style — relative links)
@@ -1538,6 +1839,33 @@ export default async function handler(req) {
       } else if (/jobs\.lever\.co\/([^/?#\s]+)/.test(url)) {
         const handle = url.match(/jobs\.lever\.co\/([^/?#\s]+)/)[1];
         return fetchLeverJobs(handle, company.name);
+
+      } else if (/(?:boards|job-boards)\.greenhouse\.io\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/(?:boards|job-boards)\.greenhouse\.io\/([^/?#\s]+)/)[1];
+        return fetchGreenhouseJobs(handle, company.name);
+
+      } else if (/apply\.workable\.com\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/apply\.workable\.com\/([^/?#\s]+)/)[1];
+        return fetchWorkableJobs(handle, company.name);
+
+      } else if (/careers\.smartrecruiters\.com\/([^/?#\s]+)/.test(url)) {
+        const handle = url.match(/careers\.smartrecruiters\.com\/([^/?#\s]+)/)[1];
+        return fetchSmartRecruitersJobs(handle, company.name);
+
+      } else if (/([a-z0-9-]+)\.recruitee\.com/.test(url)) {
+        const handle = url.match(/([a-z0-9-]+)\.recruitee\.com/)[1];
+        return fetchRecruiteeJobs(handle, company.name);
+
+      } else if (/([a-z0-9-]+)\.bamboohr\.com/.test(url)) {
+        const handle = url.match(/([a-z0-9-]+)\.bamboohr\.com/)[1];
+        return fetchBambooHRJobs(handle, company.name);
+
+      } else if (/([a-z0-9-]+)\.pinpointhq\.com/.test(url)) {
+        const handle = url.match(/([a-z0-9-]+)\.pinpointhq\.com/)[1];
+        return fetchPinpointJobs(handle, company.name);
+
+      } else if (/myworkdayjobs\.com/.test(url)) {
+        return fetchWorkdayJobs(url, company.name);
 
       } else if (/jobs\.polymer\.co\//.test(url)) {
         return fetchPolymerJobs(url, company.name);
