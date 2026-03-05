@@ -77,7 +77,7 @@ In your Vercel project dashboard: **Settings → Environment Variables**
 |---|---|---|
 | `SHEET_CSV_URL` | ✅ | Your published Google Sheet CSV URL (companies tab, gid=0) |
 
-> If `SHEET_CSV_URL` is not set, the code falls back to the CompanyOn sheet URL in the source — set this variable before going live.
+> If `SHEET_CSV_URL` is not set, the code falls back to the Companyon sheet URL in the source — set this variable before going live.
 
 ---
 

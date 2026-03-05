@@ -31,7 +31,7 @@ export const config = { runtime: 'edge' };
 // ── Configuration ────────────────────────────────────────────
 // Set SHEET_CSV_URL as a Vercel environment variable pointing to your
 // Google Sheet's "Published to web" CSV export URL (gid=0, companies tab).
-// A hardcoded fallback is kept here so existing CompanyOn deploys continue
+// A hardcoded fallback is kept here so existing Companyon deploys continue
 // working without touching Vercel settings.  See SETUP.md for instructions.
 const SHEET_CSV_URL =
   process.env.SHEET_CSV_URL ||

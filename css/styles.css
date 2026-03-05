@@ -1,6 +1,6 @@
 /* ============================================================
    Portfolio Jobs Board — Styles
-   Brand: CompanyOn Ventures
+   Brand: Companyon Ventures
    ============================================================ */
 
 /* ── RESET & BASE ── */
@@ -12,22 +12,22 @@ body {
 }
 
 /* ── DESIGN TOKENS ──
-   CompanyOn Ventures brand palette.
+   Companyon Ventures brand palette.
    Change these variables to retheme the whole page at once. */
 :root {
-  --brand-primary:   #4300EC;   /* CompanyOn electric blue-violet */
-  --brand-light:     #20A3FF;   /* CompanyOn light blue */
+  --brand-primary:   #4300EC;   /* Companyon electric blue-violet */
+  --brand-light:     #20A3FF;   /* Companyon light blue */
   --brand-hover:     #3200b8;   /* darker for button hover */
-  --brand-teal:      #64F3F8;   /* CompanyOn teal (hero stats, C mark) */
-  --brand-magenta:   #D70189;   /* CompanyOn magenta (hero accent) */
-  --hero-bg-from:    #0A1541;   /* CompanyOn dark navy */
+  --brand-teal:      #64F3F8;   /* Companyon teal (hero stats, C mark) */
+  --brand-magenta:   #D70189;   /* Companyon magenta (hero accent) */
+  --hero-bg-from:    #0A1541;   /* Companyon dark navy */
   --hero-bg-mid:     #120840;   /* deep navy-violet */
   --hero-bg-to:      #0d1850;   /* rich dark navy */
-  --page-bg:         #F4F7FF;   /* CompanyOn off-white */
+  --page-bg:         #F4F7FF;   /* Companyon off-white */
   --card-bg:         #ffffff;
   --card-border:     #e0e4f0;
-  --text-primary:    #0A1541;   /* CompanyOn dark blue */
-  --text-muted:      #485355;   /* CompanyOn gray */
+  --text-primary:    #0A1541;   /* Companyon dark blue */
+  --text-muted:      #485355;   /* Companyon gray */
   --tag-location-bg: #eef1ff;  --tag-location-fg: #3347c4;
   --tag-type-bg:     #ede9fe;  --tag-type-fg:     #4300EC;
   --tag-mode-bg:     #e7f8ff;  --tag-mode-fg:     #0069c4;

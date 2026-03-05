@@ -1,4 +1,4 @@
-# CompanyOn Ventures — Portfolio Jobs Board
+# Companyon Ventures — Portfolio Jobs Board
 
 A lightweight, static job board that aggregates open roles across portfolio companies. No backend, no dependencies — just HTML, CSS, and vanilla JS.
 

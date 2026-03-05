@@ -6,7 +6,7 @@ _Reviewed March 2026_
 
 ## Summary
 
-The codebase is well-structured and the platform-specific fetchers (Ashby, Lever, Polymer, Dover, Teamtailor, Breezy, Rippling, micro1, Custom) are already generalized by design — any firm on those platforms just works. The main barriers to open-sourcing are the CompanyOn-specific branding and configuration that are scattered across multiple files, the manual company logo system that requires touching JS and CSS for each new company, one filtering behavior that is specific to how CompanyOn uses micro1, and a few hardcoded constants that should be environment variables. None of these are deep architectural problems; they're mostly surface-level cleanups.
+The codebase is well-structured and the platform-specific fetchers (Ashby, Lever, Polymer, Dover, Teamtailor, Breezy, Rippling, micro1, Custom) are already generalized by design — any firm on those platforms just works. The main barriers to open-sourcing are the Companyon-specific branding and configuration that are scattered across multiple files, the manual company logo system that requires touching JS and CSS for each new company, one filtering behavior that is specific to how Companyon uses micro1, and a few hardcoded constants that should be environment variables. None of these are deep architectural problems; they're mostly surface-level cleanups.
 
 ---
 
@@ -52,9 +52,9 @@ This is correct for a public API, but worth calling out: if the operator wants t
 
 ## 3. Frontend Branding (index.html)
 
-Four spots are CompanyOn-specific:
+Four spots are Companyon-specific:
 
-- `<title>Portfolio Careers | CompanyOn Ventures</title>` — should reference a config variable
+- `<title>Portfolio Careers | Companyon Ventures</title>` — should reference a config variable
 - `<img src="companyon-logo.svg" ...>` — the hero logo file
 - `<h1>Jobs in Our <span>Portfolio</span></h1>` — the hero headline
 - `Copyright 2026 Companyon Ventures Management LLC` — the footer text
@@ -65,7 +65,7 @@ All four are in a single HTML file so a fork just edits these once. The cleanest
 
 ## 4. CSS Design Tokens (css/styles.css)
 
-The CSS is already well-structured for rebranding. All colors are CSS custom properties under `:root` with comments explaining which are CompanyOn brand colors (lines 17–35). A fork just changes those variables. No structural changes needed here — this is already done right.
+The CSS is already well-structured for rebranding. All colors are CSS custom properties under `:root` with comments explaining which are Companyon brand colors (lines 17–35). A fork just changes those variables. No structural changes needed here — this is already done right.
 
 The per-company `.logo-*` CSS classes (lines 242–254) are the only CSS that would be eliminated once logo handling moves to a data-driven approach (see Section 1).
 
@@ -73,7 +73,7 @@ The per-company `.logo-*` CSS classes (lines 242–254) are the only CSS that wo
 
 ## 5. micro1 "Core Team" Filter
 
-The `fetchMicro1Jobs()` function filters for jobs tagged `"Core team"` — meaning it only returns micro1's *own internal hiring*, not the contractor/client postings on their public job board. This is a very specific policy CompanyOn chose: they include micro1 as a portfolio company and want their full-time roles, not the contractor marketplace listings.
+The `fetchMicro1Jobs()` function filters for jobs tagged `"Core team"` — meaning it only returns micro1's *own internal hiring*, not the contractor/client postings on their public job board. This is a very specific policy Companyon chose: they include micro1 as a portfolio company and want their full-time roles, not the contractor marketplace listings.
 
 For a general open-source fork this behavior is confusing and should be generalized. The simplest approach is to support a per-company `filter` column in the Google Sheet (e.g., `micro1:core-team-only`), or just document the current behavior clearly so other operators can modify the filter if they use micro1 differently. The `inferDepartmentFromTitle()` helper is similarly micro1-specific but is useful for any platform that doesn't expose a structured department field.
 
