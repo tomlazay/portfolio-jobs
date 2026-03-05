@@ -458,3 +458,13 @@ body {
   color: var(--brand-teal);
   opacity: 1;
 }
+.footer-oss {
+  color: inherit;
+  text-decoration: none;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+.footer-oss:hover {
+  opacity: 1;
+  text-decoration: underline;
+}

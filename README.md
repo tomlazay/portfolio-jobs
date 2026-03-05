@@ -1,8 +1,11 @@
 # Portfolio Jobs Board
 
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+
 A lightweight, self-hosted job board that aggregates open roles from every company in your portfolio — no backend, no database, no paid services. Add a row to a Google Sheet and the job card appears automatically.
 
-**Live example:** [jobs.companyon.vc](https://jobs.companyon.vc)
+**Live example:** [jobs.companyon.vc](https://jobs.companyon.vc) · Built and open-sourced by [Companyon Ventures](https://companyon.vc)
 
 ---
 
@@ -185,6 +188,20 @@ SHEET_CSV_URL=https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=0
 
 ---
 
+## Contributing
+
+The most impactful contribution is a new ATS platform scraper — each one immediately makes the job board useful to firms whose portfolio companies use that platform.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full guide, including:
+- The job object schema every scraper must return
+- Step-by-step instructions for writing a new `fetch{Platform}Jobs()` function
+- How to add the URL pattern to the platform detector
+- How to run the smoke test suite
+
+Issues labelled [`help wanted`](https://github.com/tomlazay/portfolio-jobs/issues?q=label%3A%22help+wanted%22) are good starting points.
+
+---
+
 ## License
 
-MIT — fork freely, customize for your firm, keep or remove the attribution.
+MIT — fork freely, customize for your firm. See [LICENSE](./LICENSE).
