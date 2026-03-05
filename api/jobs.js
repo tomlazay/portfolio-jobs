@@ -147,14 +147,18 @@ async function fetchConfig() {
     const htmlRes = await fetch(pubHtmlUrl, { redirect: 'follow' });
     if (htmlRes.ok) {
       const html = await htmlRes.text();
-      // Sheets pubhtml lists tabs as: href="#gid=NNNN">TabName</a>
-      // Also handles: href="...?gid=NNNN&...">TabName</a>
-      for (const [, gid, name] of html.matchAll(/href="[^"]*[#?&]gid=(\d+)[^"]*"[^>]*>([^<]+)<\/a>/gi)) {
-        if (name.trim().toLowerCase() === 'config') {
-          configGid = gid;
-          break;
-        }
-      }
+      // Sheets pubhtml does NOT use <a href="#gid=..."> links for tab navigation.
+      // Instead it uses <td class="switcherItem">TabName</td> with no GID attribute.
+      // GIDs and tab names both appear in positional order in the HTML, so we can
+      // zip them by index to find the GID for the "Config" tab.
+      //
+      // Extract unique GIDs in order of first appearance:
+      const gids = [...new Set([...html.matchAll(/gid[=:"'\s]+(\d+)/gi)].map(m => m[1]))];
+      // Extract tab names in DOM order (switcherItemActive = current tab, switcherItem = others):
+      const tabNames = [...html.matchAll(/class="switcher(?:ItemActive|Item)">([^<]+)</gi)].map(m => m[1].trim());
+      // Zip by position to find which GID belongs to "Config"
+      const configIdx = tabNames.findIndex(n => n.toLowerCase() === 'config');
+      if (configIdx !== -1 && gids[configIdx]) configGid = gids[configIdx];
     }
   } catch (_) { /* fall through to fallback */ }
 
