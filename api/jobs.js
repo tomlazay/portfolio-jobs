@@ -1402,7 +1402,7 @@ async function fetchNotionJobs(boardUrl, companyName) {
         location,
         jobType: employment || 'Full-time',
         url:     jobUrl,
-        companyName,
+        company: companyName,
       });
     }
     return sectionJobs;
