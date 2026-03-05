@@ -137,7 +137,12 @@ async function fetchCompanies() {
 //   footerText   — footer copyright    (e.g. "Copyright 2026 My Firm LLC")
 // Returns {} silently if the tab is missing, empty, or can't be parsed.
 async function fetchConfig() {
-  const configUrl = SHEET_CSV_URL.replace(/gid=\d+/, 'gid=1');
+  // Derive the Config tab URL. Handles both URL formats:
+  //   Export format: .../export?format=csv&gid=0  → swap gid param to gid=1
+  //   Pub format:    .../pub?output=csv            → append &gid=1
+  const configUrl = /[?&]gid=\d+/.test(SHEET_CSV_URL)
+    ? SHEET_CSV_URL.replace(/gid=\d+/, 'gid=1')
+    : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 'gid=1';
   try {
     const res = await fetch(configUrl, { redirect: 'follow' });
     if (!res.ok) return {};
