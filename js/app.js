@@ -316,9 +316,16 @@ function syncUrlParams() {
 
 // ── Logo fallback ─────────────────────────────────────────────
 // Called by onerror on company logo <img> elements.
-// Swaps to the text-initial badge if the image fails to load
-// (e.g. Clearbit doesn't have a logo for this domain yet).
+// Cascade: primary (apple-touch-icon) → data-fallback (Google Favicons) → text initial.
 function logoFallback(img) {
+  // Step 1: try the secondary source stored in data-fallback
+  const fallback = img.dataset.fallback;
+  if (fallback && img.src !== fallback) {
+    img.dataset.fallback = ''; // clear to prevent an infinite onerror loop
+    img.src = fallback;
+    return;
+  }
+  // Step 2: all image sources exhausted — show initial-letter badge
   const wrap = img.parentElement;
   if (!wrap) return;
   wrap.className = 'company-logo-wrap logo-text';
@@ -360,13 +367,14 @@ function renderJobs(jobs) {
     const equityHTML = job.equity
       ? `<div class="job-comp-equity">Offers equity</div>` : '';
 
-    // Logo: use the URL from the API response (Clearbit or platform API).
-    // If missing or broken, logoFallback() swaps in the initial-letter badge.
-    const logoUrl    = job.logoUrl || '';
-    const badgeClass = logoUrl ? 'logo-img' : 'logo-text';
+    // Logo: primary source (apple-touch-icon) → fallback (Google Favicons) → text initial.
+    // logoFallback() handles the cascade automatically via data-fallback.
+    const logoUrl     = job.logoUrl || '';
+    const logoFallUrl = job.logoFallback || '';
+    const badgeClass  = logoUrl ? 'logo-img' : 'logo-text';
 
     const logoInner = logoUrl
-      ? `<img class="company-logo-img" src="${logoUrl}" alt="${job.company}" loading="lazy" onerror="logoFallback(this)">`
+      ? `<img class="company-logo-img" src="${logoUrl}" alt="${job.company}" loading="lazy" data-fallback="${logoFallUrl}" onerror="logoFallback(this)">`
       : `<span class="logo-text-fallback">${job.company.charAt(0).toUpperCase()}</span>`;
 
     card.innerHTML = `

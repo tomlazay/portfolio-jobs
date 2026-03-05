@@ -113,7 +113,8 @@ async function fetchCompanies() {
       return {
         name,
         url,
-        homepageUrl: get(cols, 'homepageurl', 'homepage', 'website'),
+        homepageUrl:  get(cols, 'homepageurl', 'homepage', 'website'),
+        logoOverride: get(cols, 'logourl', 'logo'),  // optional per-company logo URL override
       };
     })
     .filter(Boolean);
@@ -145,30 +146,41 @@ async function fetchConfig() {
   }
 }
 
-// ── Derive logo URL for a company ─────────────────────────────
-// Uses Google's Favicon API (free, no key, always returns an image).
-// Priority:
-//   1. homepageUrl column in Google Sheet → logo by domain (explicit, most reliable)
-//   2. Job board URL itself, when it is a custom domain (not an ATS subdomain)
-// ATS-hosted boards (Ashby, Lever, Polymer, etc.) can't be used for this —
-// fill in the homepageUrl column for those companies.
+// ── Derive logo URLs for a company ────────────────────────────
+// Two-source cascade (best quality first, guaranteed fallback second):
+//   Primary  : /apple-touch-icon.png on the company's own domain.
+//              Companies host this at 180×180px — far better than a favicon.
+//              A "logoUrl" column in the Google Sheet overrides this entirely.
+//   Fallback : Google Favicons API — always returns an image (used client-side
+//              via data-fallback when the primary fails).
+// ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo derivation —
+// fill in homepageUrl for those companies.
 // Ashby/Lever fetchers may also set logoUrl directly from their API responses.
 const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai/;
 
-function deriveLogoUrl(company) {
-  // 1. Explicit homepageUrl from sheet
+function getLogoDomain(company) {
   const homeUrl = (company.homepageUrl || '').trim();
   if (homeUrl) {
-    const domain = homeUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
-    if (domain) return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+    const d = homeUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+    if (d) return d;
   }
-  // 2. For custom-page companies, derive from the job board URL itself
   const url = (company.url || '').trim();
   if (url && !ATS_DOMAINS.test(url)) {
-    const domain = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
-    if (domain) return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+    const d = url.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '');
+    if (d) return d;
   }
   return '';
+}
+
+function deriveLogoPrimary(company) {
+  if (company.logoOverride) return company.logoOverride;
+  const domain = getLogoDomain(company);
+  return domain ? `https://${domain}/apple-touch-icon.png` : '';
+}
+
+function deriveLogoFallback(company) {
+  const domain = getLogoDomain(company);
+  return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=128` : '';
 }
 
 // ── Ashby ─────────────────────────────────────────────────────
@@ -1254,11 +1266,15 @@ export default async function handler(req) {
     results.forEach((result, i) => {
       if (result.status === 'fulfilled') {
         const company = companies[i];
-        // Apply logo URL to each job: prefer what the platform API already set,
-        // fall back to Google Favicons (derived from homepageUrl or custom page domain).
-        const fallbackLogo = deriveLogoUrl(company);
+        // Apply logo URLs to each job.
+        // Primary  : apple-touch-icon (or sheet override) — better quality.
+        // Fallback : Google Favicons  — guaranteed to return something.
+        // The client tries primary first, then fallback, then text initial.
+        const primaryLogo  = deriveLogoPrimary(company);
+        const fallbackLogo = deriveLogoFallback(company);
         result.value.forEach(job => {
-          if (!job.logoUrl) job.logoUrl = fallbackLogo;
+          if (!job.logoUrl) job.logoUrl = primaryLogo;
+          if (!job.logoFallback) job.logoFallback = fallbackLogo;
         });
         allJobs.push(...result.value);
       } else {
