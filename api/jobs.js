@@ -39,13 +39,11 @@
 export const config = { runtime: 'edge' };
 
 // ── Configuration ────────────────────────────────────────────
-// Set SHEET_CSV_URL as a Vercel environment variable pointing to your
-// Google Sheet's "Published to web" CSV export URL (gid=0, companies tab).
-// A hardcoded fallback is kept here so existing Companyon deploys continue
-// working without touching Vercel settings.  See SETUP.md for instructions.
-const SHEET_CSV_URL =
-  process.env.SHEET_CSV_URL ||
-  'https://docs.google.com/spreadsheets/d/1xWYzNKkfUYV18CL7DpX_Q_HstHuJR6-i76Jqxd9cRXs/export?format=csv&gid=0';
+// REQUIRED: Set SHEET_CSV_URL as a Vercel environment variable.
+// In the Vercel dashboard: Settings → Environment Variables → Add new.
+// Value format: https://docs.google.com/spreadsheets/d/{YOUR_SHEET_ID}/export?format=csv&gid=0
+// See SETUP.md for step-by-step instructions including the "Publish to web" step.
+const SHEET_CSV_URL = process.env.SHEET_CSV_URL || '';
 
 // Ashby employmentType → display label
 const ASHBY_TYPE_MAP = {
@@ -1822,6 +1820,15 @@ export default async function handler(req) {
   };
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: HEADERS });
+
+  // Guard: surface a clear error if the required env var is missing rather than
+  // silently returning an empty job list or a cryptic network error.
+  if (!SHEET_CSV_URL) {
+    return new Response(
+      JSON.stringify({ error: 'SHEET_CSV_URL environment variable is not set. See SETUP.md for instructions.' }),
+      { status: 500, headers: HEADERS }
+    );
+  }
 
   try {
     // Fetch company list and site config in parallel (both are fast CSV fetches).
