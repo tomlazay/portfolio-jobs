@@ -1334,8 +1334,10 @@ async function fetchNotionJobs(boardUrl, companyName) {
     const qcRm    = qcData.recordMap || {};
     const dept    = deptNames[collectionId] || '';
 
-    // Get property schema for this collection (maps propId → { name, type })
-    const collVal = unwrap(qcRm.collection?.[collectionId]);
+    // Get property schema for this collection (maps propId → { name, type }).
+    // Prefer the schema from the queryCollection response; fall back to the
+    // page-chunk data loaded in step 1 (loadCachedPageChunkV2).
+    const collVal = unwrap(qcRm.collection?.[collectionId]) ?? unwrap(rm.collection?.[collectionId]);
     const schema  = collVal?.schema || {};
 
     // Identify property IDs for the fields we care about
@@ -1349,18 +1351,33 @@ async function fetchNotionJobs(boardUrl, companyName) {
 
     // Ordered list of job page block IDs returned by the reducer
     const blockIds = qcData.result?.reducerResults?.collection_group_results?.blockIds || [];
-    const rmBlockKeys = Object.keys(qcRm.block || {}).length;
 
-    // Diagnostic: if we got blockIds but the recordMap has no blocks, the
-    // server-side response is stripped — surface this so it appears in errors[].
-    if (blockIds.length > 0 && rmBlockKeys === 0) {
-      throw new Error(`Notion: queryCollection returned ${blockIds.length} blockIds but recordMap.block is empty for ${companyName} (collection ${collectionId})`);
+    // Notion's queryCollection often omits block data in server-to-server calls
+    // (the recordMap.block is empty even though blockIds is populated).
+    // When that happens, fall back to fetching the blocks individually via
+    // syncRecordValues — the same endpoint Notion's own client uses.
+    let blockMap = qcRm.block || {};
+    if (blockIds.length > 0 && Object.keys(blockMap).length === 0) {
+      const svRes = await fetch(`${apiBase}/syncRecordValues`, {
+        method:  'POST',
+        headers: hdrs,
+        body: JSON.stringify({
+          requests: blockIds.map(id => ({ pointer: { table: 'block', id }, version: -1 })),
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (svRes.ok) {
+        const svData = await svRes.json();
+        blockMap = svData.recordMap?.block || {};
+      }
+      // If syncRecordValues also fails, blockMap stays {} and we'll return 0 jobs,
+      // which will be caught by the zero-jobs diagnostic throw below.
     }
 
     const sectionJobs = [];
 
     for (const blockId of blockIds) {
-      const bVal = unwrap(qcRm.block?.[blockId]);
+      const bVal = unwrap(blockMap?.[blockId]);
       if (!bVal || bVal.type !== 'page') continue;
 
       const props  = bVal.properties || {};
