@@ -81,7 +81,7 @@ const SCRAPE_HEADERS = {
 // can be added to the sheet without code changes.
 // Required columns : name  (or: company)
 //                    url   (or: jobspagesource, jobspage, jobsurl, jobboardurl, boardurl)
-// Optional columns : homepageUrl  (company website; used for Clearbit logo lookup)
+// Optional columns : homepageUrl  (company website; used for og:image logo lookup)
 //                                 e.g. https://posh.com — NOT the ATS job board URL
 async function fetchCompanies() {
   const res = await fetch(SHEET_CSV_URL, { redirect: 'follow' });
@@ -147,15 +147,18 @@ async function fetchConfig() {
 }
 
 // ── Derive logo URLs for a company ────────────────────────────
-// Two-source cascade (best quality first, guaranteed fallback second):
-//   Primary  : /apple-touch-icon.png on the company's own domain.
-//              Companies host this at 180×180px — far better than a favicon.
-//              A "logoUrl" column in the Google Sheet overrides this entirely.
-//   Fallback : Google Favicons API — always returns an image (used client-side
-//              via data-fallback when the primary fails).
-// ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo derivation —
-// fill in homepageUrl for those companies.
-// Ashby/Lever fetchers may also set logoUrl directly from their API responses.
+// Three-source cascade (server chooses the best available primary):
+//   1. Sheet "logoUrl" column override (manually curated — always wins).
+//   2. ATS-provided logoUrl (e.g. Ashby API returns one for many companies).
+//   3. og:image fetched server-side from the company homepage (3 s timeout).
+//      Companies deliberately choose this for social link previews — it is
+//      almost always a clean brand image on a light background.
+//   4. /apple-touch-icon.png on the company domain (180×180px app icon;
+//      can have dark/branded backgrounds — used only when og:image fails).
+//   Fallback (client-side, via data-fallback attribute):
+//      Google Favicons API — always returns something, even for obscure domains.
+// ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo domain derivation —
+// fill in homepageUrl for those companies so og:image can be fetched.
 const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai/;
 
 function getLogoDomain(company) {
@@ -172,15 +175,68 @@ function getLogoDomain(company) {
   return '';
 }
 
-function deriveLogoPrimary(company) {
+// Returns the apple-touch-icon URL (used only when og:image is unavailable).
+function deriveAppleTouchIcon(company) {
   if (company.logoOverride) return company.logoOverride;
   const domain = getLogoDomain(company);
   return domain ? `https://${domain}/apple-touch-icon.png` : '';
 }
 
+// Returns the Google Favicons URL — always resolves, used as client-side data-fallback.
 function deriveLogoFallback(company) {
   const domain = getLogoDomain(company);
   return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=128` : '';
+}
+
+// ── Fetch og:image from a company homepage ────────────────────
+// Reads only the first ~10 KB of the response (the <head> is always early).
+// Returns an absolute URL string, or '' on any failure or timeout.
+async function fetchOgImage(homeUrl) {
+  if (!homeUrl) return '';
+  try {
+    const resp = await fetch(homeUrl, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; portfolio-jobs-bot/1.0)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!resp.ok) return '';
+
+    // Stream the response and stop as soon as we have enough to find og:image.
+    const reader = resp.body?.getReader();
+    if (!reader) return '';
+    const decoder = new TextDecoder();
+    let html = '';
+    let bytesRead = 0;
+    const LIMIT = 12_000; // 12 KB is plenty to cover any <head> block
+    while (bytesRead < LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      html += decoder.decode(value, { stream: true });
+      bytesRead += value.byteLength;
+      if (html.includes('</head>')) break; // no need to read further
+    }
+    reader.cancel().catch(() => {});
+
+    // Match <meta property="og:image" content="..."> in either attribute order.
+    const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+           || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+    if (!m) return '';
+
+    const raw = m[1].trim();
+    if (!raw) return '';
+    // Resolve protocol-relative and root-relative URLs.
+    if (raw.startsWith('//')) return `https:${raw}`;
+    if (raw.startsWith('/')) {
+      const origin = homeUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || '';
+      return origin ? `${origin}${raw}` : '';
+    }
+    return raw.startsWith('http') ? raw : '';
+  } catch {
+    return ''; // timeout, DNS failure, non-HTML response, etc.
+  }
 }
 
 // ── Ashby ─────────────────────────────────────────────────────
@@ -192,7 +248,7 @@ async function fetchAshbyJobs(handle, companyName) {
   const data = await res.json();
 
   // Ashby may return an org-level logo in the response. Try common paths.
-  // If not present, handler will fall back to Clearbit via homepageUrl column.
+  // If not present, handler will use og:image fetched from homepageUrl (or company domain).
   const ashbyLogo = data.logoUrl || data.jobBoard?.logoUrl
                  || data.jobBoard?.logoWordmarkUrl || data.organization?.logoUrl || '';
 
@@ -223,7 +279,7 @@ async function fetchAshbyJobs(handle, companyName) {
       compensation: formatSalary(rawComp),
       equity:       hasEquity,
       url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
-      logoUrl:      ashbyLogo,   // handler fills in Clearbit fallback if empty
+      logoUrl:      ashbyLogo,   // handler fills in og:image or apple-touch-icon if empty
     };
   });
 }
@@ -254,7 +310,7 @@ async function fetchLeverJobs(handle, companyName) {
       compensation: comp,
       equity:       false,
       url:          job.hostedUrl || `https://jobs.lever.co/${handle}`,
-      logoUrl:      '',   // handler fills in Clearbit via homepageUrl
+      logoUrl:      '',   // handler fills in og:image fetched from homepageUrl
     };
   });
 }
@@ -1095,7 +1151,7 @@ async function fetchMicro1Jobs(companyName) {
         compensation: formatSalary(rawComp),
         equity:       false,
         url:          jobUrl,
-        logoUrl:      '',   // handler fills in Clearbit via homepageUrl
+        logoUrl:      '',   // handler fills in og:image fetched from homepageUrl
       });
     }
 
@@ -1259,21 +1315,38 @@ export default async function handler(req) {
       }
     }
 
-    const results = await Promise.allSettled(companies.map(fetchOneCompany));
+    // Run job fetches and og:image fetches in parallel so there's no extra
+    // wall-clock cost — both races finish roughly at the same time.
+    const [results, ogImages] = await Promise.all([
+      Promise.allSettled(companies.map(fetchOneCompany)),
+      Promise.all(companies.map(company => {
+        // Skip og:image fetch when a manual override or ATS logo is available
+        // (those are already correct; fetching og:image would be wasted work).
+        if (company.logoOverride) return Promise.resolve('');
+        const domain = getLogoDomain(company);
+        if (!domain) return Promise.resolve('');
+        const homeUrl = (company.homepageUrl || '').trim() || `https://${domain}`;
+        return fetchOgImage(homeUrl);
+      })),
+    ]);
 
     const allJobs = [];
     const errors  = [];
     results.forEach((result, i) => {
       if (result.status === 'fulfilled') {
-        const company = companies[i];
-        // Apply logo URLs to each job.
-        // Primary  : apple-touch-icon (or sheet override) — better quality.
-        // Fallback : Google Favicons  — guaranteed to return something.
-        // The client tries primary first, then fallback, then text initial.
-        const primaryLogo  = deriveLogoPrimary(company);
+        const company      = companies[i];
+        const ogImage      = ogImages[i] || '';
+        // Logo cascade:
+        //   1. Sheet logoOverride  — manually curated, highest trust.
+        //   2. ATS-provided logoUrl (already on individual jobs; not touched here).
+        //   3. og:image from homepage — company's deliberate social preview image;
+        //      almost always a clean brand logo on a light background.
+        //   4. apple-touch-icon    — good quality but can have dark backgrounds.
+        // Google Favicons is always the client-side data-fallback (never fails).
+        const primaryLogo  = company.logoOverride || ogImage || deriveAppleTouchIcon(company);
         const fallbackLogo = deriveLogoFallback(company);
         result.value.forEach(job => {
-          if (!job.logoUrl) job.logoUrl = primaryLogo;
+          if (!job.logoUrl)      job.logoUrl      = primaryLogo;
           if (!job.logoFallback) job.logoFallback = fallbackLogo;
         });
         allJobs.push(...result.value);
