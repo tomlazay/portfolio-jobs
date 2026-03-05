@@ -162,20 +162,36 @@ function abbreviateStates(str) {
 // Canonical map for known location variants (case-insensitive key lookup).
 // Add entries here whenever new aliases appear in the filter dropdown.
 const LOCATION_ALIASES = {
-  'new york city':  'New York, NY',
-  'new york ny':    'New York, NY',
-  'new york, ny':   'New York, NY',
-  'new york':       'New York, NY',
-  'nyc':            'New York, NY',
+  'new york city':         'New York, NY',
+  'new york ny':           'New York, NY',
+  'new york, ny':          'New York, NY',
+  'new york':              'New York, NY',
+  'nyc':                   'New York, NY',
+  // NYC boroughs / neighbourhoods that should roll up to the city
+  'brooklyn':              'New York, NY',
+  'brooklyn, ny':          'New York, NY',
+  'brooklyn, new york':    'New York, NY',
+  'dumbo, brooklyn':       'New York, NY',
+  'dumbo':                 'New York, NY',
+  'manhattan':             'New York, NY',
+  'manhattan, ny':         'New York, NY',
+  'queens':                'New York, NY',
+  'queens, ny':            'New York, NY',
+  'bronx':                 'New York, NY',
+  'the bronx':             'New York, NY',
+  'staten island':         'New York, NY',
 };
 
 function normalizeLocation(raw) {
-  const key = (raw || '').toLowerCase().trim();
-  // 1. Check explicit alias map first
+  if (!raw) return raw;
+  // 1. Strip emoji characters (e.g. "New York 🗽" → "New York")
+  const stripped = raw.replace(/\p{Emoji}/gu, '').trim();
+  const key = stripped.toLowerCase();
+  // 2. Check explicit alias map
   const aliased = LOCATION_ALIASES[key];
   if (aliased) return aliased;
-  // 2. Abbreviate any full state names found in the string
-  return abbreviateStates(raw);
+  // 3. Abbreviate any full state names found in the string
+  return abbreviateStates(stripped);
 }
 
 // Canonical job-type map — collapses spelling/casing variants from different
