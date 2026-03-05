@@ -194,6 +194,48 @@ function normalizeLocation(raw) {
   return abbreviateStates(stripped);
 }
 
+// Canonical department map — collapses naming variants from different ATS
+// platforms into a consistent set of filter labels.
+// Add entries here whenever new aliases appear in the filter dropdown.
+const DEPT_ALIASES = {
+  // Engineering
+  'software development':    'Engineering',
+  'product & engineering':   'Engineering',
+
+  // Customer Success
+  'customer support':        'Customer Success',
+  'customer experience':     'Customer Success',
+  'customer service':        'Customer Success',
+
+  // Operations
+  'admin':                   'Operations',
+  'administration':          'Operations',
+
+  // Business Development
+  'partnerships':            'Business Development',
+  'partnership':             'Business Development',
+
+  // Marketing
+  'growth':                  'Marketing',
+  'community':               'Marketing',
+  'content':                 'Marketing',
+  'brand':                   'Marketing',
+
+  // Suppress generic catch-all
+  'other':                   '',
+};
+
+function normalizeDepartment(raw) {
+  if (!raw) return raw;
+  const key = raw.trim().toLowerCase();
+  // Check alias map (returns '' for suppressed entries like "Other")
+  if (Object.prototype.hasOwnProperty.call(DEPT_ALIASES, key)) {
+    return DEPT_ALIASES[key];
+  }
+  // Keep original (preserve capitalisation from the source)
+  return raw.trim();
+}
+
 // Canonical job-type map — collapses spelling/casing variants from different
 // job boards into a single consistent label.
 function normalizeJobType(raw) {
@@ -212,12 +254,14 @@ function normalizeJobType(raw) {
   return s;
 }
 
-// Run once after ALL_JOBS is populated to canonicalise location and type strings.
+// Run once after ALL_JOBS is populated to canonicalise location, department,
+// and job-type strings.
 function normalizeJobs(jobs) {
   return jobs.map(j => ({
     ...j,
-    location: normalizeLocation(j.location),
-    type:     normalizeJobType(j.type),
+    location:   normalizeLocation(j.location),
+    department: normalizeDepartment(j.department),
+    type:       normalizeJobType(j.type),
   }));
 }
 
