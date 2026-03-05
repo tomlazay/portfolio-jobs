@@ -81,7 +81,7 @@ const SCRAPE_HEADERS = {
 // can be added to the sheet without code changes.
 // Required columns : name  (or: company)
 //                    url   (or: jobspagesource, jobspage, jobsurl, jobboardurl, boardurl)
-// Optional columns : homepageUrl  (company website; used for og:image logo lookup)
+// Optional columns : homepageUrl  (company website; used for structured logo lookup)
 //                                 e.g. https://posh.com — NOT the ATS job board URL
 async function fetchCompanies() {
   const res = await fetch(SHEET_CSV_URL, { redirect: 'follow' });
@@ -147,18 +147,18 @@ async function fetchConfig() {
 }
 
 // ── Derive logo URLs for a company ────────────────────────────
-// Three-source cascade (server chooses the best available primary):
+// Cascade (server picks the best available primary, client has a guaranteed fallback):
 //   1. Sheet "logoUrl" column override (manually curated — always wins).
 //   2. ATS-provided logoUrl (e.g. Ashby API returns one for many companies).
-//   3. og:image fetched server-side from the company homepage (3 s timeout).
-//      Companies deliberately choose this for social link previews — it is
-//      almost always a clean brand image on a light background.
-//   4. /apple-touch-icon.png on the company domain (180×180px app icon;
-//      can have dark/branded backgrounds — used only when og:image fails).
+//   3. Schema.org Organization.logo from homepage JSON-LD — Google's rich-result
+//      spec requires this to be a clean image on a light/transparent background.
+//   4. SVG favicon from homepage — vector, scales perfectly at any badge size.
+//   5. /apple-touch-icon.png on the company domain — 180×180px but may have
+//      dark or heavily branded backgrounds (e.g. app icons).
 //   Fallback (client-side, via data-fallback attribute):
 //      Google Favicons API — always returns something, even for obscure domains.
 // ATS-hosted boards (Ashby, Lever, etc.) can't be used for logo domain derivation —
-// fill in homepageUrl for those companies so og:image can be fetched.
+// fill in homepageUrl for those companies so structured logo sources can be fetched.
 const ATS_DOMAINS = /ashbyhq\.com|lever\.co|polymer\.co|dover\.com|teamtailor\.com|breezy\.hr|rippling\.com|micro1\.ai/;
 
 function getLogoDomain(company) {
@@ -175,7 +175,7 @@ function getLogoDomain(company) {
   return '';
 }
 
-// Returns the apple-touch-icon URL (used only when og:image is unavailable).
+// Returns the apple-touch-icon URL (used only when structured logo sources are unavailable).
 function deriveAppleTouchIcon(company) {
   if (company.logoOverride) return company.logoOverride;
   const domain = getLogoDomain(company);
@@ -188,10 +188,24 @@ function deriveLogoFallback(company) {
   return domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=128` : '';
 }
 
-// ── Fetch og:image from a company homepage ────────────────────
-// Reads only the first ~10 KB of the response (the <head> is always early).
-// Returns an absolute URL string, or '' on any failure or timeout.
-async function fetchOgImage(homeUrl) {
+// ── Fetch structured logo from a company homepage ─────────────
+// Reads the first ~15 KB of the homepage (enough to cover any <head> block)
+// and looks for two high-confidence logo sources, in order:
+//
+//   1. Schema.org Organization.logo (JSON-LD)
+//      Companies include this for Google rich results. Google's own guidelines
+//      require it to be "a clean image on a transparent, white, or light-colored
+//      background" — exactly what we want for badges.
+//      Handles: string URL, ImageObject {url/contentUrl}, @graph arrays,
+//               multi-type arrays (["Organization","Corporation"]).
+//
+//   2. SVG favicon (<link rel="icon" type="image/svg+xml">)
+//      A vector icon scales perfectly at any badge size and is always a clean mark.
+//      Many modern companies ship an SVG favicon specifically for this reason.
+//
+// Returns an absolute URL string, or '' if neither source is found.
+// Times out after 3 s so it never blocks the response.
+async function fetchLogoFromHomepage(homeUrl) {
   if (!homeUrl) return '';
   try {
     const resp = await fetch(homeUrl, {
@@ -204,38 +218,73 @@ async function fetchOgImage(homeUrl) {
     });
     if (!resp.ok) return '';
 
-    // Stream the response and stop as soon as we have enough to find og:image.
+    // Stream the first 15 KB and stop at </head> — no need to read the body.
     const reader = resp.body?.getReader();
     if (!reader) return '';
     const decoder = new TextDecoder();
     let html = '';
     let bytesRead = 0;
-    const LIMIT = 12_000; // 12 KB is plenty to cover any <head> block
+    const LIMIT = 15_000;
     while (bytesRead < LIMIT) {
       const { done, value } = await reader.read();
       if (done) break;
       html += decoder.decode(value, { stream: true });
       bytesRead += value.byteLength;
-      if (html.includes('</head>')) break; // no need to read further
+      if (html.includes('</head>')) break;
     }
     reader.cancel().catch(() => {});
 
-    // Match <meta property="og:image" content="..."> in either attribute order.
-    const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
-           || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    if (!m) return '';
-
-    const raw = m[1].trim();
-    if (!raw) return '';
-    // Resolve protocol-relative and root-relative URLs.
-    if (raw.startsWith('//')) return `https:${raw}`;
-    if (raw.startsWith('/')) {
-      const origin = homeUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || '';
-      return origin ? `${origin}${raw}` : '';
+    // Helper: resolve protocol-relative and root-relative URLs against the homepage origin.
+    const origin = homeUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || '';
+    function resolveUrl(raw) {
+      if (!raw || typeof raw !== 'string') return '';
+      const s = raw.trim();
+      if (s.startsWith('//'))   return `https:${s}`;
+      if (s.startsWith('/'))    return origin ? `${origin}${s}` : '';
+      return s.startsWith('http') ? s : '';
     }
-    return raw.startsWith('http') ? raw : '';
+
+    // ── Source 1: Schema.org Organization.logo (JSON-LD) ─────
+    // Scan all <script type="application/ld+json"> blocks in the page head.
+    const jsonLdRe = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let jm;
+    while ((jm = jsonLdRe.exec(html)) !== null) {
+      let data;
+      try { data = JSON.parse(jm[1]); } catch { continue; }
+
+      // Normalise: a single object or a @graph array both become a flat list.
+      const items = Array.isArray(data?.['@graph']) ? data['@graph']
+                  : data ? [data] : [];
+
+      for (const item of items) {
+        if (!item || !item.logo) continue;
+        // Accept: Organization, Corporation, LocalBusiness, Brand (and arrays thereof)
+        const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type'] || ''];
+        const isOrg = types.some(t => /^(Organization|Corporation|LocalBusiness|Brand)$/i.test(t));
+        if (!isOrg) continue;
+
+        // logo can be a URL string or an ImageObject with url/contentUrl
+        const logoSrc = typeof item.logo === 'string' ? item.logo
+                      : item.logo?.url || item.logo?.contentUrl || '';
+        const resolved = resolveUrl(logoSrc);
+        if (resolved) return resolved;
+      }
+    }
+
+    // ── Source 2: SVG favicon ─────────────────────────────────
+    // Match <link rel="icon" type="image/svg+xml" href="..."> in either attribute order.
+    const svgIcon = html.match(/<link[^>]+type=["']image\/svg\+xml["'][^>]+href=["']([^"']+)["'][^>]*>/i)
+                 || html.match(/<link[^>]+href=["']([^"']+)["'][^>]+type=["']image\/svg\+xml["'][^>]*>/i)
+                 || html.match(/<link[^>]+rel=["'][^"']*icon[^"']*["'][^>]+href=["']([^"']+\.svg(?:\?[^"']*)?)["'][^>]*>/i)
+                 || html.match(/<link[^>]+href=["']([^"']+\.svg(?:\?[^"']*)?)["'][^>]+rel=["'][^"']*icon[^"']*["'][^>]*>/i);
+    if (svgIcon) {
+      const resolved = resolveUrl(svgIcon[1]);
+      if (resolved) return resolved;
+    }
+
+    return ''; // no structured logo found — caller falls back to apple-touch-icon
   } catch {
-    return ''; // timeout, DNS failure, non-HTML response, etc.
+    return ''; // timeout, DNS failure, non-HTML, etc.
   }
 }
 
@@ -248,7 +297,7 @@ async function fetchAshbyJobs(handle, companyName) {
   const data = await res.json();
 
   // Ashby may return an org-level logo in the response. Try common paths.
-  // If not present, handler will use og:image fetched from homepageUrl (or company domain).
+  // If not present, handler will use Schema.org/SVG logo from homepageUrl (or apple-touch-icon).
   const ashbyLogo = data.logoUrl || data.jobBoard?.logoUrl
                  || data.jobBoard?.logoWordmarkUrl || data.organization?.logoUrl || '';
 
@@ -279,7 +328,7 @@ async function fetchAshbyJobs(handle, companyName) {
       compensation: formatSalary(rawComp),
       equity:       hasEquity,
       url:          job.jobUrl || `https://jobs.ashbyhq.com/${handle}`,
-      logoUrl:      ashbyLogo,   // handler fills in og:image or apple-touch-icon if empty
+      logoUrl:      ashbyLogo,   // handler fills in Schema.org/SVG/apple-touch-icon logo if empty
     };
   });
 }
@@ -310,7 +359,7 @@ async function fetchLeverJobs(handle, companyName) {
       compensation: comp,
       equity:       false,
       url:          job.hostedUrl || `https://jobs.lever.co/${handle}`,
-      logoUrl:      '',   // handler fills in og:image fetched from homepageUrl
+      logoUrl:      '',   // handler fills in Schema.org/SVG/apple-touch-icon logo
     };
   });
 }
@@ -1151,7 +1200,7 @@ async function fetchMicro1Jobs(companyName) {
         compensation: formatSalary(rawComp),
         equity:       false,
         url:          jobUrl,
-        logoUrl:      '',   // handler fills in og:image fetched from homepageUrl
+        logoUrl:      '',   // handler fills in Schema.org/SVG/apple-touch-icon logo
       });
     }
 
@@ -1315,18 +1364,18 @@ export default async function handler(req) {
       }
     }
 
-    // Run job fetches and og:image fetches in parallel so there's no extra
+    // Run job fetches and homepage logo fetches in parallel — no extra wall-clock cost.
     // wall-clock cost — both races finish roughly at the same time.
     const [results, ogImages] = await Promise.all([
       Promise.allSettled(companies.map(fetchOneCompany)),
       Promise.all(companies.map(company => {
-        // Skip og:image fetch when a manual override or ATS logo is available
-        // (those are already correct; fetching og:image would be wasted work).
+        // Skip homepage fetch when a manual override or ATS logo is already available
+        // (those are already correct; fetching the homepage would be wasted work).
         if (company.logoOverride) return Promise.resolve('');
         const domain = getLogoDomain(company);
         if (!domain) return Promise.resolve('');
         const homeUrl = (company.homepageUrl || '').trim() || `https://${domain}`;
-        return fetchOgImage(homeUrl);
+        return fetchLogoFromHomepage(homeUrl);
       })),
     ]);
 
@@ -1336,12 +1385,11 @@ export default async function handler(req) {
       if (result.status === 'fulfilled') {
         const company      = companies[i];
         const ogImage      = ogImages[i] || '';
-        // Logo cascade:
-        //   1. Sheet logoOverride  — manually curated, highest trust.
-        //   2. ATS-provided logoUrl (already on individual jobs; not touched here).
-        //   3. og:image from homepage — company's deliberate social preview image;
-        //      almost always a clean brand logo on a light background.
-        //   4. apple-touch-icon    — good quality but can have dark backgrounds.
+        // Logo cascade (see deriveAppleTouchIcon / fetchLogoFromHomepage comments):
+        //   1. Sheet logoOverride   — manually curated, highest trust.
+        //   2. ATS-provided logoUrl — already set on individual job objects.
+        //   3. Schema.org logo / SVG favicon from homepage (fetchLogoFromHomepage).
+        //   4. apple-touch-icon    — fallback when structured sources are absent.
         // Google Favicons is always the client-side data-fallback (never fails).
         const primaryLogo  = company.logoOverride || ogImage || deriveAppleTouchIcon(company);
         const fallbackLogo = deriveLogoFallback(company);
