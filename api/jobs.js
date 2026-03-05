@@ -1286,7 +1286,10 @@ async function fetchNotionJobs(boardUrl, companyName) {
     .map(([id, entry]) => ({ id, block: unwrap(entry) }))
     .filter(({ block }) => block?.type === 'collection_view' && block.collection_id);
 
-  if (cvBlocks.length === 0) return [];
+  if (cvBlocks.length === 0) {
+    const totalBlocks = Object.keys(rm.block || {}).length;
+    throw new Error(`Notion: 0 collection_view blocks found (${totalBlocks} total blocks) for ${companyName}`);
+  }
 
   // Build collectionId → department name map from the page chunk
   const deptNames = {};
@@ -1325,7 +1328,7 @@ async function fetchNotionJobs(boardUrl, companyName) {
       }),
       signal: AbortSignal.timeout(5000),
     });
-    if (!qcRes.ok) return [];
+    if (!qcRes.ok) throw new Error(`Notion queryCollection HTTP ${qcRes.status} for collection ${collectionId} (${companyName})`);
 
     const qcData  = await qcRes.json();
     const qcRm    = qcData.recordMap || {};
@@ -1380,10 +1383,15 @@ async function fetchNotionJobs(boardUrl, companyName) {
     return sectionJobs;
   }));
 
-  // Flatten all fulfilled results
-  return collectionResults
-    .filter(r => r.status === 'fulfilled')
-    .flatMap(r => r.value);
+  // If every collection query failed, surface the first error so it appears in
+  // the API's errors[] array rather than silently returning an empty list.
+  const fulfilled  = collectionResults.filter(r => r.status === 'fulfilled');
+  const rejected   = collectionResults.filter(r => r.status === 'rejected');
+  if (fulfilled.length === 0 && rejected.length > 0) {
+    throw rejected[0].reason;
+  }
+
+  return fulfilled.flatMap(r => r.value);
 }
 
 // ── Helpers ───────────────────────────────────────────────────
