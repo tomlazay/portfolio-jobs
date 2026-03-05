@@ -1,6 +1,6 @@
 # Setup Guide — Portfolio Jobs Board
 
-This guide covers everything you need to fork and run your own instance of this job board. For a non-technical step-by-step walkthrough (including GitHub, Vercel, and Google Sheets setup from scratch), see [USER_GUIDE.md](./USER_GUIDE.md).
+This guide covers everything you need to fork and run your own instance of this job board. For a non-technical step-by-step walkthrough (including GitHub, Vercel, and Google Sheets setup from scratch), see [USER_GUIDE.docx](./USER_GUIDE.docx).
 
 ---
 

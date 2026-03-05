@@ -72,7 +72,7 @@ portfolio-jobs/
 ├── logo.svg            # FORK: replace with your firm's SVG logo
 ├── favicon.ico / .png  # FORK: replace with your icons
 ├── SETUP.md            # Step-by-step deploy guide
-└── USER_GUIDE.md       # Non-technical setup guide
+└── USER_GUIDE.docx     # Non-technical setup guide (Word document)
 ```
 
 ---
