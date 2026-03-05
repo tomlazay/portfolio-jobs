@@ -128,7 +128,7 @@ async function fetchCompanies() {
     .filter(Boolean);
 }
 
-// ── Fetch site config from Google Sheet (second tab, gid=1) ──
+// ── Fetch site config from Google Sheet (Config tab) ──
 // The config tab must have two columns: "key" and "value".
 // Supported keys:
 //   siteTitle    — browser tab title  (e.g. "Portfolio Careers | My Firm")
@@ -137,12 +137,34 @@ async function fetchCompanies() {
 //   footerText   — footer copyright    (e.g. "Copyright 2026 My Firm LLC")
 // Returns {} silently if the tab is missing, empty, or can't be parsed.
 async function fetchConfig() {
-  // Derive the Config tab URL. Handles both URL formats:
-  //   Export format: .../export?format=csv&gid=0  → swap gid param to gid=1
-  //   Pub format:    .../pub?output=csv            → append &gid=1
+  // ── Step 1: Discover the Config tab's GID from the pubhtml index ───────
+  // Google assigns GIDs arbitrarily on tab creation (NOT sequential: 0, 1, 2…).
+  // We fetch the published sheet's HTML to find which GID belongs to "Config".
+  let configGid = null;
+  try {
+    // Convert pub CSV URL → pubhtml index URL (strips gid/single/output params)
+    const pubHtmlUrl = SHEET_CSV_URL.replace(/\/pub(\?.*)?$/, '/pubhtml');
+    const htmlRes = await fetch(pubHtmlUrl, { redirect: 'follow' });
+    if (htmlRes.ok) {
+      const html = await htmlRes.text();
+      // Sheets pubhtml lists tabs as: href="#gid=NNNN">TabName</a>
+      // Also handles: href="...?gid=NNNN&...">TabName</a>
+      for (const [, gid, name] of html.matchAll(/href="[^"]*[#?&]gid=(\d+)[^"]*"[^>]*>([^<]+)<\/a>/gi)) {
+        if (name.trim().toLowerCase() === 'config') {
+          configGid = gid;
+          break;
+        }
+      }
+    }
+  } catch (_) { /* fall through to fallback */ }
+
+  // If auto-discovery fails (export-format URL, network issue, etc.), fall back to gid=1
+  if (!configGid) configGid = '1';
+
+  // ── Step 2: Build the Config tab CSV URL and fetch it ─────────────────
   const configUrl = /[?&]gid=\d+/.test(SHEET_CSV_URL)
-    ? SHEET_CSV_URL.replace(/gid=\d+/, 'gid=1')
-    : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + 'gid=1';
+    ? SHEET_CSV_URL.replace(/gid=\d+/, `gid=${configGid}`)
+    : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + `gid=${configGid}`;
   try {
     const res = await fetch(configUrl, { redirect: 'follow' });
     if (!res.ok) return {};
