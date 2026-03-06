@@ -107,11 +107,40 @@ After adding the variable, trigger a new deployment: **Deployments → Redeploy*
 
 ## 3. Branding
 
+### Quick-Start: One File to Edit, One Command to Run
+
+All firm-specific values are centralized in **`fork-config.json`** at the repo root. Edit that file, then run:
+
+```bash
+python scripts/generate-og.py
+```
+
+The script regenerates `og-image.png` with your logo and colors, and automatically patches all matching meta tags in `index.html`. Commit both files.
+
+**`fork-config.json` fields:**
+
+| Field | Description | Example |
+|---|---|---|
+| `firmName` | Your firm's display name | `"Acme Ventures"` |
+| `siteUrl` | Your deployed site URL (no trailing slash) | `"https://jobs.acme.vc"` |
+| `pageTitle` | Browser tab / social card title | `"Portfolio Careers \| Acme Ventures"` |
+| `description` | Meta description and social card subtitle | `"Explore open roles across…"` |
+| `twitterHandle` | X/Twitter handle (include `@`) | `"@acmevc"` |
+| `ogImageHeadline` | Large text on the OG image | `"Portfolio Careers"` |
+| `ogImageTagline` | Smaller text below the headline on the OG image | `"Explore open roles across our portfolio"` |
+| `logoFile` | Logo filename at repo root | `"logo.svg"` |
+| `accentColor` | Hex accent color used on the OG image | `"#4300EC"` |
+| `bgColor` | Hex background color used on the OG image | `"#0A1541"` |
+
+> **Requirements for `generate-og.py`:** Python 3.8+, Pillow, cairosvg.
+> Install with: `pip install Pillow cairosvg`
+> For best typography: install the Lato font (`sudo apt install fonts-lato` on Linux, or `brew install --cask font-lato` on Mac). The script falls back gracefully to the system font if Lato is unavailable.
+
+---
+
 ### Logo
 
-Replace `logo.svg` in the repo root with your firm's SVG logo file. Then:
-- Update the `src` attribute in `index.html` (search for `logo.svg`)
-- Update the `og:image` and `twitter:image` meta tags in `index.html` with the absolute URL of the logo on your deployed domain
+Replace `logo.svg` in the repo root with your firm's SVG logo file. Update `logoFile` in `fork-config.json` if you use a different filename, then re-run `generate-og.py`.
 
 Also replace `favicon.ico` and `favicon.png` with your own icons.
 
@@ -130,17 +159,18 @@ Edit the CSS custom properties at the top of `css/styles.css` under `:root`:
 }
 ```
 
-Six values control the entire visual identity of the site.
+Six values control the entire visual identity of the site. Set `accentColor` and `bgColor` in `fork-config.json` to matching values so the OG image stays in sync.
 
 ### Hero Text & Footer
 
-**Option A (code edit):** Edit directly in `index.html` — update `<h1 id="hero-headline">`, `<p id="hero-subtext">`, and `<span class="footer-copy" id="footer-copy">`.
+**Option A (no code edit):** Set the `heroHeadline`, `heroSubtext`, and `footerText` keys in the Google Sheet config tab. These override the HTML at runtime without touching any files.
 
-**Option B (no code edit):** Set the `heroHeadline`, `heroSubtext`, and `footerText` keys in the Google Sheet config tab. These override the HTML at runtime.
+**Option B (code edit):** Edit directly in `index.html` — update `<h1 id="hero-headline">`, `<p id="hero-subtext">`, and `<span class="footer-copy" id="footer-copy">`.
 
 ### SEO / Open Graph
 
-Update these in `index.html`:
+Running `python scripts/generate-og.py` handles all meta tags automatically from `fork-config.json`. If you need to patch `index.html` manually, update these tags:
+
 - `<title>` — browser tab and search result title
 - `<meta name="description">` — search result snippet
 - `<link rel="canonical">` — your deployed domain
