@@ -92,7 +92,7 @@ const SCRAPE_HEADERS = {
 // Optional columns : homepageUrl  (company website; used for structured logo lookup)
 //                                 e.g. https://posh.com — NOT the ATS job board URL
 async function fetchCompanies() {
-  const res = await fetch(SHEET_CSV_URL, { redirect: 'follow' });
+  const res = await fetch(SHEET_CSV_URL, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
   const csv = await res.text();
 
@@ -342,7 +342,9 @@ async function fetchLogoFromHomepage(homeUrl) {
 async function fetchAshbyJobs(handle, companyName) {
   // includeCompensation=true adds job.compensation object with structured salary data.
   // Without it, no compensation fields are returned in the listing.
-  const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${handle}?includeCompensation=true`);
+  const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${handle}?includeCompensation=true`, {
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) throw new Error(`Ashby fetch failed for "${handle}": ${res.status}`);
   const data = await res.json();
 
@@ -385,7 +387,9 @@ async function fetchAshbyJobs(handle, companyName) {
 
 // ── Lever ─────────────────────────────────────────────────────
 async function fetchLeverJobs(handle, companyName) {
-  const res = await fetch(`https://api.lever.co/v0/postings/${handle}?mode=json`);
+  const res = await fetch(`https://api.lever.co/v0/postings/${handle}?mode=json`, {
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) throw new Error(`Lever fetch failed for "${handle}": ${res.status}`);
   const data = await res.json();
 
@@ -448,6 +452,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
           'Accept-Language': SCRAPE_HEADERS['Accept-Language'],
           'User-Agent':      SCRAPE_HEADERS['User-Agent'],
         },
+        signal: AbortSignal.timeout(8000),
       });
       if (!apiRes.ok) {
         // Log actual status so we can distinguish 401/403/404 in error reports
@@ -502,7 +507,7 @@ async function fetchPolymerJobs(pageUrl, companyName) {
   // fetch() follows redirects automatically; .url gives the final URL.
   // This is critical for renamed companies (e.g. sheet has /daylit but
   // Polymer redirects to /lendica — slug mismatch breaks link scraping).
-  const htmlRes = await fetch(baseUrl, { headers: SCRAPE_HEADERS });
+  const htmlRes = await fetch(baseUrl, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
   if (!htmlRes.ok) {
     throw new Error(
       `Polymer: HTML fetch failed for "${companyName}" (${baseUrl}): HTTP ${htmlRes.status}`
@@ -662,7 +667,7 @@ async function fetchDoverJobs(handle, companyName) {
       try {
         const slugRes = await fetch(
           `https://app.dover.com/api/v1/careers-page-slug/${candidate}`,
-          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS }, signal: AbortSignal.timeout(8000) }
         );
         if (!slugRes.ok) continue;
         const ct = slugRes.headers.get('content-type') || '';
@@ -673,7 +678,7 @@ async function fetchDoverJobs(handle, companyName) {
 
         const jobsRes = await fetch(
           `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
-          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS } }
+          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS }, signal: AbortSignal.timeout(8000) }
         );
         if (!jobsRes.ok) continue;
         const jct = jobsRes.headers.get('content-type') || '';
@@ -695,7 +700,7 @@ async function fetchDoverJobs(handle, companyName) {
 
   // ── Strategy 2: HTML page (__NEXT_DATA__ + link scraping) ────
   async function tryDoverHtml() {
-    const htmlRes = await fetch(pageUrl, { headers: SCRAPE_HEADERS });
+    const htmlRes = await fetch(pageUrl, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
     if (!htmlRes.ok) throw new Error(`Dover HTML fetch failed for "${companyName}": HTTP ${htmlRes.status}`);
     const html = await htmlRes.text();
 
@@ -765,7 +770,7 @@ async function fetchDoverJobs(handle, companyName) {
 async function fetchTeamtailorJobs(pageUrl, companyName) {
   const baseUrl = pageUrl.split('#')[0].split('?')[0];
 
-  const res = await fetch(baseUrl, { headers: SCRAPE_HEADERS });
+  const res = await fetch(baseUrl, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`Teamtailor fetch failed for "${companyName}": ${res.status}`);
   const html = await res.text();
 
@@ -857,7 +862,7 @@ async function fetchRipplingJobs(boardSlug, companyName) {
 
   let html = '';
   for (const url of urls) {
-    const res = await fetch(url, { headers: SCRAPE_HEADERS });
+    const res = await fetch(url, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
     if (res.ok) { html = await res.text(); break; }
   }
   if (!html) throw new Error(`Rippling fetch failed for "${companyName}"`);
@@ -920,6 +925,7 @@ async function fetchRipplingJobs(boardSlug, companyName) {
 async function fetchBreezyJobs(handle, companyName) {
   const res = await fetch(`https://${handle}.breezy.hr/json`, {
     headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS },
+    signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`Breezy fetch failed for "${companyName}": ${res.status}`);
   const data = await res.json();
@@ -955,7 +961,7 @@ async function fetchBreezyJobs(handle, companyName) {
 //   https://job-boards.greenhouse.io/acme  →  handle = "acme"
 async function fetchGreenhouseJobs(handle, companyName) {
   const url = `https://boards-api.greenhouse.io/v1/boards/${handle}/jobs?content=true`;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`Greenhouse fetch failed for "${companyName}" (${handle}): ${res.status}`);
   const data = await res.json();
 
@@ -1254,7 +1260,7 @@ async function fetchCustomJobs(pageUrl, companyName) {
   const domainMatch = baseUrl.match(/^(https?:\/\/[^/]+)/);
   const domain      = domainMatch ? domainMatch[1] : '';
 
-  const res = await fetch(baseUrl, { headers: SCRAPE_HEADERS });
+  const res = await fetch(baseUrl, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`Custom page fetch failed for "${companyName}": ${res.status}`);
   const html = await res.text();
 
@@ -1319,7 +1325,7 @@ async function fetchCustomJobs(pageUrl, companyName) {
   if (jobs.length > 0) {
     await Promise.allSettled(jobs.map(async job => {
       try {
-        const jobRes = await fetch(job.url, { headers: SCRAPE_HEADERS });
+        const jobRes = await fetch(job.url, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(5000) });
         if (!jobRes.ok) return;
         const jobHtml = await jobRes.text();
         const comp = extractCompensationFromHtml(jobHtml);
@@ -1444,6 +1450,7 @@ async function fetchMicro1Jobs(companyName) {
       method:  'POST',
       headers: MICRO1_HEADERS,
       body:    JSON.stringify({ action: 'get_all_jobs', page, limit: LIMIT, keyword: '' }),
+      signal:  AbortSignal.timeout(8000),
     });
 
     // Capture body text first so we can include it in error messages
@@ -1951,10 +1958,24 @@ export default async function handler(req) {
       }
     }
 
+    // Per-company timeout: each company has at most 20 s to return its jobs.
+    // Some ATS fetchers make multiple sequential HTTP requests (Dover, Polymer, custom
+    // scraper). Without a ceiling, a single slow/hung company can push the total
+    // past Vercel's 30 s edge-function wall-clock limit and return a 504.
+    const COMPANY_TIMEOUT_MS = 20_000;
+    function withCompanyTimeout(company) {
+      return Promise.race([
+        fetchOneCompany(company),
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error(`${company.name}: timed out after ${COMPANY_TIMEOUT_MS / 1000}s`)), COMPANY_TIMEOUT_MS)
+        ),
+      ]);
+    }
+
     // Run job fetches and homepage logo fetches in parallel — no extra wall-clock cost.
     // wall-clock cost — both races finish roughly at the same time.
     const [results, ogImages] = await Promise.all([
-      Promise.allSettled(companies.map(fetchOneCompany)),
+      Promise.allSettled(companies.map(withCompanyTimeout)),
       Promise.all(companies.map(company => {
         // Skip homepage fetch when a manual override or ATS logo is already available
         // (those are already correct; fetching the homepage would be wasted work).
