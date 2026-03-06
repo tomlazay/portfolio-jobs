@@ -667,7 +667,7 @@ async function fetchDoverJobs(handle, companyName) {
       try {
         const slugRes = await fetch(
           `https://app.dover.com/api/v1/careers-page-slug/${candidate}`,
-          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS }, signal: AbortSignal.timeout(8000) }
+          { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) }
         );
         if (!slugRes.ok) continue;
         const ct = slugRes.headers.get('content-type') || '';
@@ -678,7 +678,7 @@ async function fetchDoverJobs(handle, companyName) {
 
         const jobsRes = await fetch(
           `https://app.dover.com/api/v1/job-groups/${uuid}/job-groups`,
-          { headers: { 'Accept': 'application/json', ...SCRAPE_HEADERS }, signal: AbortSignal.timeout(8000) }
+          { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(8000) }
         );
         if (!jobsRes.ok) continue;
         const jct = jobsRes.headers.get('content-type') || '';
@@ -700,7 +700,13 @@ async function fetchDoverJobs(handle, companyName) {
 
   // ── Strategy 2: HTML page (__NEXT_DATA__ + link scraping) ────
   async function tryDoverHtml() {
-    const htmlRes = await fetch(pageUrl, { headers: SCRAPE_HEADERS, signal: AbortSignal.timeout(8000) });
+    // Use a plain Accept header only — omit browser-fingerprint headers (sec-ch-ua,
+    // Accept-Language, etc.) that Cloudflare's bot-scoring penalises when the
+    // TLS fingerprint (from Cloudflare Workers) doesn't match a real browser.
+    const htmlRes = await fetch(pageUrl, {
+      headers: { 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+      signal: AbortSignal.timeout(8000),
+    });
     if (!htmlRes.ok) throw new Error(`Dover HTML fetch failed for "${companyName}": HTTP ${htmlRes.status}`);
     const html = await htmlRes.text();
 
@@ -1427,7 +1433,8 @@ function inferDepartmentFromTitle(title) {
 
 async function fetchMicro1Jobs(companyName) {
   const BASE = 'https://prod-api.micro1.ai/api/v1/job/portal';
-  const LIMIT = 18;
+  const LIMIT = 100;    // larger page size → fewer round-trips → less timeout risk
+  const MAX_PAGES = 5;  // hard cap on pagination to bound worst-case fetch time
   const allJobs = [];
   let page = 1;
   let totalSeen = 0;          // total jobs seen across all pages (for diagnostics)
@@ -1558,6 +1565,7 @@ async function fetchMicro1Jobs(companyName) {
     // Stop if we've received fewer items than the page limit (last page)
     const total = json.total || json.data?.total || json.meta?.total || Infinity;
     if (list.length < LIMIT || allJobs.length >= total) break;
+    if (page >= MAX_PAGES) break;  // safety cap — avoid unbounded pagination
     page++;
   }
 
