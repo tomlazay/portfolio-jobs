@@ -25,7 +25,7 @@ Browser  (index.html + js/app.js)
   → shareable URLs (?company=Acme&dept=Engineering)
 ```
 
-The Edge Function runs on Cloudflare Workers via Vercel — this means all outbound requests originate from Cloudflare IPs, which bypasses Cloudflare bot protection on third-party job boards. Results are cached at the CDN edge for 24 hours.
+The Edge Function runs on Cloudflare Workers via Vercel — all outbound requests originate from Cloudflare IPs. This helps with many bot-detection systems but is not universal (some platforms, e.g. those running their own Cloudflare rules, may still 403 Workers IPs). Results are cached at the CDN edge for 24 hours.
 
 ---
 
@@ -61,7 +61,10 @@ Platform detection is automatic — just paste the company's job board URL into 
 
 ```
 portfolio-jobs/
-├── index.html          # Page shell — update FORK comments for your branding
+├── fork-config.json    # FORK: single source of truth — edit this to rebrand
+├── index.html          # Page shell — meta tags auto-patched by generate-og.py
+├── scripts/
+│   └── generate-og.py  # Run after editing fork-config.json to regen OG image + meta tags
 ├── css/
 │   └── styles.css      # All styles — edit :root variables to rebrand
 ├── js/
@@ -109,13 +112,16 @@ Copy the URL — this is your `SHEET_CSV_URL`.
 
 ### 4 — Customize branding
 
+The quickest path: edit **`fork-config.json`** (one file) and run `python scripts/generate-og.py` (one command). That regenerates the OG image and patches all meta tags in `index.html` automatically.
+
 | What | Where |
 |---|---|
-| Brand colors | `:root` variables in `css/styles.css` |
+| Firm name, site URL, description, social handles | `fork-config.json` → re-run `generate-og.py` |
+| Brand colors (OG image) | `accentColor` / `bgColor` in `fork-config.json` |
+| Brand colors (site UI) | `:root` variables in `css/styles.css` |
 | Hero text / footer | `index.html` (static) or Google Sheet config tab (runtime override) |
-| Logo | Replace `logo.svg`; update `src` in `index.html` and `og:image` meta tag |
+| Logo | Replace `logo.svg`; set `logoFile` in `fork-config.json`; re-run `generate-og.py` |
 | Favicon | Replace `favicon.ico` and `favicon.png` |
-| Site title / SEO | `<title>` and `<meta>` tags in `index.html` |
 
 ---
 
@@ -129,10 +135,11 @@ The entry point is the default export `handler(req)`. On each request it:
 
 1. Checks `SHEET_CSV_URL` env var is set, returns 500 if not.
 2. Calls `fetchCompanies()` and `fetchConfig()` in parallel — both parse CSV tabs from the Google Sheet.
-3. Runs `fetchOneCompany(company)` for every company via `Promise.allSettled` (all in parallel; one company's failure never blocks the others).
+3. Runs `fetchOneCompany(company)` for every company via `Promise.allSettled`, wrapped in a `withCompanyTimeout()` 20-second `Promise.race()` ceiling (all companies run in parallel; one failure or timeout never blocks the others).
 4. `fetchOneCompany` is an if/else chain that matches the company's URL against a regex for each supported ATS platform and calls the corresponding `fetch{Platform}Jobs()` function.
-5. Logo resolution: simultaneously fetches each company's homepage to extract a structured logo (Schema.org JSON-LD → SVG favicon → apple-touch-icon). Google Favicons API is always sent as a client-side fallback in `data-fallback`.
-6. Returns `{ jobs, companies, config, errors, fetchedAt }` as JSON with a 24h CDN cache header.
+5. Every `fetch()` call inside a platform fetcher has an `AbortSignal.timeout(8000)` (or 5 s for cheap secondary calls) to prevent a hung request from consuming the Vercel Edge Runtime's 30-second wall-clock budget.
+6. Logo resolution: simultaneously fetches each company's homepage to extract a structured logo (Schema.org JSON-LD → SVG favicon → apple-touch-icon). Google Favicons API is always sent as a client-side fallback in `data-fallback`.
+7. Returns `{ jobs, companies, config, errors, fetchedAt }` as JSON with a 24h CDN cache header.
 
 **Adding a new ATS platform:**
 1. Write `fetchXxxJobs(handle, companyName)` returning `Promise<Job[]>`.

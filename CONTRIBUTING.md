@@ -63,6 +63,7 @@ async function fetch{PlatformName}Jobs(handle, companyName) {
 
 Key rules:
 - **Always set a timeout** — `AbortSignal.timeout(8000)` prevents one slow platform from blocking the entire response.
+- **Use minimal request headers on JSON APIs** — send only `Accept: application/json`. Do not spread `SCRAPE_HEADERS` (the browser-fingerprint object) into API fetch calls. Cloudflare Workers have a non-browser TLS fingerprint; pairing that with full browser UA/sec-ch-ua headers triggers bot-detection heuristics on platforms that run Cloudflare themselves (resulting in 403s).
 - **Never throw on empty results** — if a company has 0 open jobs, return `[]` rather than throwing. Only throw on genuine API errors (non-2xx status, unexpected response shape).
 - **Set `logoUrl: ''` and `logoFallback: ''`** — the main handler fills these in from the company's homepage; don't try to source logos inside the fetcher.
 - **Map raw fields defensively** — use `|| ''` fallbacks; assume any field could be missing or null.

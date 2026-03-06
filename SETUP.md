@@ -51,7 +51,7 @@ The first sheet tab drives the company list. Add one row per portfolio company.
 | Notion | `https://{workspace}.notion.site/{page}` | Must be a public Notion page with a database of jobs |
 | Custom | Any URL with `/careers/`, `/open-roles/`, or `/about/careers/` | Falls back to link scraping |
 
-> **micro1 note:** By default only micro1's own internal "Core team" roles are fetched — not contractor/marketplace listings. See the `fetchMicro1Jobs()` function in `api/jobs.js` for instructions on changing this filter.
+> **micro1 note:** By default only micro1's own internal "Core team" roles are fetched — not contractor/marketplace listings. The fetcher requests up to 100 jobs per page and caps at 5 pages to stay within the Edge Runtime's time budget. See `fetchMicro1Jobs()` in `api/jobs.js` to change the filter or pagination limits.
 
 > **Greenhouse note:** Paste the direct board URL (`boards.greenhouse.io/yourcompany`), not the company's vanity redirect (e.g. `yourcompany.com/careers`). Vanity URLs are not matched by the platform detector and fall through to the generic scraper.
 
@@ -177,6 +177,8 @@ Running `python scripts/generate-og.py` handles all meta tags automatically from
 - `<link rel="canonical">` — your deployed domain
 - `og:url`, `og:site_name`, `og:title`, `og:description`, `og:image` — social share preview
 - `twitter:site` — your Twitter/X handle (or remove this tag)
+- `article:author` — firm name shown by LinkedIn's link preview as the article author
+- `article:published_time` — ISO 8601 datetime shown by LinkedIn as the publication date (driven by `publishedDate` in `fork-config.json`)
 
 ---
 
@@ -233,6 +235,7 @@ Open `http://localhost:3000`.
 
 ## 7. Deployment Notes
 
-- **Vercel** is the recommended host. The `config = { runtime: 'edge' }` export in `api/jobs.js` targets Vercel's Edge Runtime (Cloudflare Workers), which gives the outbound fetch requests Cloudflare IPs — bypassing bot protection on some job boards. Do not move the function to a different runtime without testing.
+- **Vercel** is the recommended host. The `config = { runtime: 'edge' }` export in `api/jobs.js` targets Vercel's Edge Runtime (Cloudflare Workers), which gives the outbound fetch requests Cloudflare IPs — useful for many bot-detection systems. Do not move the function to a different runtime without testing.
+- **Timeout budget**: The Edge Runtime has a 30-second wall-clock limit per request. Every `fetch()` call in `api/jobs.js` has an `AbortSignal.timeout()` (8 s per request, 20 s per company via `withCompanyTimeout()`). If you add new ATS fetchers, follow the same pattern to avoid 504 errors.
 - **CDN caching**: The API response includes `s-maxage=86400` (24 hours). Vercel's CDN caches it globally. Redeploy or call `vercel --force` to bust the cache if you need an immediate refresh.
 - **Cold starts**: The Edge Runtime has no cold start penalty unlike Serverless Functions — the first visitor after a cache miss gets a fast response.
