@@ -141,17 +141,25 @@ async function fetchConfig() {
   // Google assigns GIDs arbitrarily on tab creation (NOT sequential: 0, 1, 2…).
   // We fetch the pubhtml to extract the numeric GID list — tab names are NOT
   // reliably present in unauthenticated pubhtml, but GID numbers always are.
+  //
+  // URL normalisation: SHEET_CSV_URL may use either format Google produces:
+  //   • /pub?gid=0&single=true&output=csv   ("Publish to web" URL)
+  //   • /export?format=csv&gid=0            (direct export URL)
+  // Strip the suffix of either form and append /pubhtml to get the tab index.
   let allGids = [];
   try {
-    const pubHtmlUrl = SHEET_CSV_URL.replace(/\/pub(\?.*)?$/, '/pubhtml');
-    const htmlRes = await fetch(pubHtmlUrl, { redirect: 'follow' });
+    const pubHtmlUrl = SHEET_CSV_URL.replace(/\/(pub|export)(\?.*)?$/, '/pubhtml');
+    const htmlRes = await fetch(pubHtmlUrl, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(5000),
+    });
     if (htmlRes.ok) {
       const html = await htmlRes.text();
       // GIDs appear as gid=NNNN or gid:"NNNN" in both authenticated and
       // unauthenticated pubhtml. Deduplicate, preserving first-appearance order.
       allGids = [...new Set([...html.matchAll(/gid[=:"'\s]+(\d+)/gi)].map(m => m[1]))];
     }
-  } catch (_) { /* fall through */ }
+  } catch (_) { /* timeout, DNS failure, etc. — fall through */ }
 
   // ── Step 2: Find Config tab by probing each non-main-sheet GID ─────────
   // Skip the main sheet GID (already known from SHEET_CSV_URL).
@@ -159,14 +167,17 @@ async function fetchConfig() {
   // which uniquely identify the Config tab. No tab-name parsing needed.
   const mainGid = (SHEET_CSV_URL.match(/[?&]gid=(\d+)/) || [])[1] || '0';
   const candidates = allGids.filter(g => g !== mainGid);
-  if (!candidates.includes('1')) candidates.push('1'); // fallback for export-format URLs
+  if (!candidates.includes('1')) candidates.push('1'); // fallback for pub-format URLs
 
   for (const gid of candidates) {
     const url = /[?&]gid=\d+/.test(SHEET_CSV_URL)
       ? SHEET_CSV_URL.replace(/gid=\d+/, `gid=${gid}`)
       : SHEET_CSV_URL + (SHEET_CSV_URL.includes('?') ? '&' : '?') + `gid=${gid}`;
     try {
-      const res = await fetch(url, { redirect: 'follow' });
+      const res = await fetch(url, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(5000),
+      });
       if (!res.ok) continue;
       const csv = await res.text();
       const header = csv.trim().split('\n')[0]?.toLowerCase() || '';
