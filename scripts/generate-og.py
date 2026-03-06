@@ -54,12 +54,19 @@ firm_name    = cfg.get("firmName",        "Your Firm")
 site_url     = cfg.get("siteUrl",         "https://your-domain.vercel.app").rstrip("/")
 page_title   = cfg.get("pageTitle",       f"Portfolio Careers | {firm_name}")
 description  = cfg.get("description",     f"Explore open roles across {firm_name}'s portfolio companies.")
-twitter_hdl  = cfg.get("twitterHandle",   "@yourfirmhandle")
-og_headline  = cfg.get("ogImageHeadline", "Portfolio Careers")
-og_tagline   = cfg.get("ogImageTagline",  f"Explore open roles across our portfolio companies")
-logo_file    = cfg.get("logoFile",        "logo.svg")
-accent_hex   = cfg.get("accentColor",     "#00b6fe")
-bg_hex       = cfg.get("bgColor",         "#0d1b2a")
+twitter_hdl    = cfg.get("twitterHandle",   "@yourfirmhandle")
+og_headline    = cfg.get("ogImageHeadline", "Portfolio Careers")
+og_tagline     = cfg.get("ogImageTagline",  f"Explore open roles across our portfolio companies")
+logo_file      = cfg.get("logoFile",        "logo.svg")
+accent_hex     = cfg.get("accentColor",     "#00b6fe")
+bg_hex         = cfg.get("bgColor",         "#0d1b2a")
+published_date = cfg.get("publishedDate",   __import__("datetime").date.today().isoformat())
+
+# Normalise to ISO 8601 datetime string (LinkedIn requires the time component)
+if len(published_date) == 10:          # "YYYY-MM-DD" → add time + UTC offset
+    published_time = published_date + "T00:00:00Z"
+else:
+    published_time = published_date    # already a full datetime string
 
 logo_path    = REPO_ROOT / logo_file
 og_image_url = f"{site_url}/og-image.png"
@@ -237,6 +244,16 @@ html = patch_tag(html,
 html = patch_tag(html,
     r'(<meta\s+name="twitter:image"\s+content=")[^"]*(")',
     rf'\g<1>{og_image_url}\g<2>')
+
+# article:author (LinkedIn author field)
+html = patch_tag(html,
+    r'(<meta\s+property="article:author"\s+content=")[^"]*(")',
+    rf'\g<1>{firm_name}\g<2>')
+
+# article:published_time (LinkedIn publish date field)
+html = patch_tag(html,
+    r'(<meta\s+property="article:published_time"\s+content=")[^"]*(")',
+    rf'\g<1>{published_time}\g<2>')
 
 # Logo alt text
 html = patch_tag(html,

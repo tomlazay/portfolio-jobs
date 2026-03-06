@@ -131,6 +131,7 @@ The script regenerates `og-image.png` with your logo and colors, and automatical
 | `logoFile` | Logo filename at repo root | `"logo.svg"` |
 | `accentColor` | Hex accent color used on the OG image | `"#4300EC"` |
 | `bgColor` | Hex background color used on the OG image | `"#0A1541"` |
+| `publishedDate` | Launch date for LinkedIn's "Publish date" field (`YYYY-MM-DD`) | `"2026-03-06"` |
 
 > **Requirements for `generate-og.py`:** Python 3.8+, Pillow, cairosvg.
 > Install with: `pip install Pillow cairosvg`
