@@ -5,34 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- ── Primary SEO ───────────────────────────────────────── -->
-  <!-- FORK: update the title, description, and canonical URL for your firm.
-       Or set siteTitle / heroHeadline / heroSubtext in your Google Sheet config tab
-       and they will override these values at runtime (title excluded — update manually). -->
-  <title>Portfolio Careers | Your Firm</title>
-  <meta name="description" content="Explore open roles across our portfolio of companies. Find your next opportunity here.">
+  <!-- SEO: title / description are the static defaults for crawlers and social cards.
+       Set siteTitle / heroHeadline / heroSubtext in your Google Sheet config tab
+       to override the runtime display text (title tag must be updated here). -->
+  <title>Portfolio Careers | Companyon Ventures</title>
+  <meta name="description" content="Explore open roles across Companyon Ventures' portfolio companies. Find your next opportunity in B2B software.">
   <meta name="robots" content="index, follow">
-  <!-- FORK: update to your deployed domain -->
-  <link rel="canonical" href="https://your-domain.vercel.app">
+  <link rel="canonical" href="https://jobs.companyon.vc">
 
   <!-- ── Open Graph (LinkedIn, Facebook, Slack, iMessage…) ── -->
-  <!-- FORK: update all og: URLs and content values to your firm -->
   <meta property="og:type"        content="website">
-  <meta property="og:url"         content="https://your-domain.vercel.app">
-  <meta property="og:site_name"   content="Your Firm">
-  <meta property="og:title"       content="Portfolio Careers | Your Firm">
-  <meta property="og:description" content="Explore open roles across our portfolio of companies. Find your next opportunity here.">
-  <!-- FORK: replace with your logo path — must be an absolute URL -->
-  <meta property="og:image"       content="https://your-domain.vercel.app/logo.svg">
+  <meta property="og:url"         content="https://jobs.companyon.vc">
+  <meta property="og:site_name"   content="Companyon Ventures">
+  <meta property="og:title"       content="Portfolio Careers | Companyon Ventures">
+  <meta property="og:description" content="Explore open roles across Companyon Ventures' portfolio companies. Find your next opportunity in B2B software.">
+  <meta property="og:image"       content="https://jobs.companyon.vc/og-image.png">
+  <meta property="og:image:width"  content="1200">
+  <meta property="og:image:height" content="630">
 
   <!-- ── X / Twitter Card ─────────────────────────────────── -->
-  <!-- FORK: update twitter:site to your firm's handle (or remove the tag) -->
-  <meta name="twitter:card"        content="summary">
-  <meta name="twitter:site"        content="@yourfirmhandle">
-  <meta name="twitter:title"       content="Portfolio Careers | Your Firm">
-  <meta name="twitter:description" content="Explore open roles across our portfolio of companies. Find your next opportunity here.">
-  <meta name="twitter:image"       content="https://your-domain.vercel.app/logo.svg">
+  <meta name="twitter:card"        content="summary_large_image">
+  <meta name="twitter:site"        content="@companyonvc">
+  <meta name="twitter:title"       content="Portfolio Careers | Companyon Ventures">
+  <meta name="twitter:description" content="Explore open roles across Companyon Ventures' portfolio companies. Find your next opportunity in B2B software.">
+  <meta name="twitter:image"       content="https://jobs.companyon.vc/og-image.png">
 
-  <!-- FORK: replace favicon.ico / favicon.png with your own icons -->
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
   <link rel="stylesheet" href="css/styles.css">
@@ -42,9 +39,9 @@
 <!-- HERO -->
 <div class="hero">
   <div class="hero-brand">
-    <!-- FORK: replace logo.svg with your firm's logo file and update the src/alt below.
+    <!-- Logo:
          The filename must also be updated in any og:image / twitter:image meta tags above. -->
-    <img src="logo.svg" alt="Your Firm" class="hero-logo">
+    <img src="logo.svg" alt="Companyon Ventures" class="hero-logo">
   </div>
   <!-- FORK: update hero text below, or set "heroHeadline" / "heroSubtext" in your Google Sheet config tab
        to override these at runtime without editing code. -->
@@ -117,7 +114,7 @@
   <div class="site-footer-inner">
     <!-- FORK: update this copyright line, or set "footerText" in your Google Sheet config tab
          to override it at runtime without editing code. -->
-    <span class="footer-copy" id="footer-copy">© 2026 Your Firm</span>
+    <span class="footer-copy" id="footer-copy">© 2026 Companyon Ventures</span>
     <span class="footer-divider">·</span>
     <span class="footer-updated">Last Updated: <span id="last-updated">—</span></span>
     <span class="footer-divider">·</span>
