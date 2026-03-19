@@ -1,0 +1,24 @@
+name: Warm cache after deploy
+
+on:
+  deployment_status:
+
+jobs:
+  warm:
+    # Only run when Vercel marks Production as successful
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment_status.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prime KV cache
+        run: |
+          echo "Warming cache at https://jobs.companyon.vc/api/jobs ..."
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" https://jobs.companyon.vc/api/jobs)
+          echo "Response status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 300 ]; then
+            echo "Cache warmed successfully."
+          else
+            echo "Warning: unexpected status $STATUS" >&2
+            exit 1
+          fi
