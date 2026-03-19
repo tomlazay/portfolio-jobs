@@ -98,10 +98,15 @@ In your Vercel project dashboard: **Settings → Environment Variables → Add n
 | Variable | Required | Value |
 |---|---|---|
 | `SHEET_CSV_URL` | ✅ | Your published Google Sheet CSV URL (Tab 1 / gid=0) |
+| `KV_REST_API_URL` | Recommended | Added automatically when you connect Upstash (see Section 8) |
+| `KV_REST_API_TOKEN` | Recommended | Added automatically when you connect Upstash (see Section 8) |
+| `CRON_SECRET` | Recommended | Any random string (~20 chars). Protects the scheduled cache refresh from being triggered by outside parties. |
 
 If `SHEET_CSV_URL` is not set, the API returns a 500 error with a message directing you to this guide.
 
-After adding the variable, trigger a new deployment: **Deployments → Redeploy**.
+`KV_REST_API_URL`, `KV_REST_API_TOKEN`, and `CRON_SECRET` are only required if you set up the KV cache (Section 8). Without them, the job board falls back to live scraping on every request, which works but is slower for first-time visitors.
+
+After adding variables, trigger a new deployment: **Deployments → Redeploy**.
 
 ---
 
@@ -238,4 +243,59 @@ Open `http://localhost:3000`.
 - **Vercel** is the recommended host. The `config = { runtime: 'edge' }` export in `api/jobs.js` targets Vercel's Edge Runtime (Cloudflare Workers), which gives the outbound fetch requests Cloudflare IPs — useful for many bot-detection systems. Do not move the function to a different runtime without testing.
 - **Timeout budget**: The Edge Runtime has a 30-second wall-clock limit per request. Every `fetch()` call in `api/jobs.js` has an `AbortSignal.timeout()` (8 s per request, 20 s per company via `withCompanyTimeout()`). If you add new ATS fetchers, follow the same pattern to avoid 504 errors.
 - **CDN caching**: The API response includes `s-maxage=86400` (24 hours). Vercel's CDN caches it globally. Redeploy or call `vercel --force` to bust the cache if you need an immediate refresh.
-- **Cold starts**: The Edge Runtime has no cold start penalty unlike Serverless Functions — the first visitor after a cache miss gets a fast response.
+- **First-load latency**: The Edge Function live-scrapes all ATS endpoints on every cache miss, which takes 3–8 seconds depending on how many portfolio companies you have. Vercel's CDN cache (`s-maxage=86400`) helps for repeat visitors in the same region, but a new region or a fresh deployment means the first visitor sees the full scrape time. Set up the KV cache (Section 8) to eliminate this for all visitors.
+- **KV cache**: When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, the handler checks Upstash before scraping. A cache hit returns in ~50 ms. A cron job refreshes the cache every 4 hours so it never expires between visits. A GitHub Actions workflow warms the cache immediately after every deployment so even the very first post-deploy visitor gets a fast response.
+
+---
+
+## 8. Performance: KV Cache Setup (Upstash)
+
+By default the job board scrapes all ATS endpoints on every request. This takes 3–8 seconds for portfolios with many companies. The KV cache stores a pre-built copy of the job data in Upstash (a managed Redis service) so all visitors — in any browser, any region, at any time — get an instant response after the cache is first populated.
+
+The cache is kept fresh by a Vercel Cron job that runs every 4 hours. A GitHub Actions workflow (`warm-cache.yml`) warms the cache immediately after each deployment so there is never a cold window for real visitors.
+
+### 8.1 Create an Upstash Database
+
+1. In your Vercel project dashboard, click **Storage** in the top navigation.
+2. Click **Browse Marketplace** and select **Upstash**.
+3. From the Upstash dropdown, select **Redis**.
+4. Configure the new database:
+   - **Region:** `iad1` (US East — lowest latency to Vercel's default region)
+   - **Eviction:** Off (jobs data must not be silently evicted)
+   - **Plan:** Free (sufficient for this use case)
+5. Click **Create and Continue**, then **Create Database** on the confirmation screen.
+
+### 8.2 Connect the Database to Your Project
+
+6. On the **Connect a Project** screen, select your `portfolio-jobs` project.
+7. **Important:** Find the **Custom Environment Variable Prefix** field and delete any value that is already there (e.g. `STORAGE`). Leave it completely blank. If you leave `STORAGE` in the field, Vercel creates variables named `STORAGE_KV_REST_API_URL` instead of `KV_REST_API_URL`, and the integration will not work.
+8. Click **Connect**.
+
+Vercel now automatically adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` to your project's environment variables.
+
+### 8.3 Add CRON_SECRET
+
+9. In your Vercel project, go to **Settings → Environment Variables**.
+10. Add a new variable:
+    - **Name:** `CRON_SECRET`
+    - **Value:** Any random string of 16–20 characters (letters, numbers, symbols). Generate one at [randomkeygen.com](https://randomkeygen.com) or create your own.
+11. Click **Save**.
+
+> **Security note:** Keep `CRON_SECRET` private. It prevents outside parties from triggering a forced cache refresh on your endpoint. Do not share it in chat, email, or commit it to the repository.
+
+### 8.4 Redeploy
+
+12. Go to **Deployments** in your Vercel project dashboard.
+13. Find the most recent deployment, click the **⋯** (three dots) menu, and click **Redeploy**.
+14. Leave **"Use existing build cache"** unchecked so the new environment variables are picked up.
+
+After the redeploy completes, GitHub Actions automatically calls `/api/jobs` to warm the cache (via the `warm-cache.yml` workflow). Within about 30–60 seconds of the deployment finishing, the cache is populated and all subsequent visitors will get instant results.
+
+### How It Works After Setup
+
+| Scenario | Load time |
+|---|---|
+| First visitor after deployment | ~50 ms — cache warmed by GitHub Actions |
+| Any subsequent visitor (any browser, any country) | ~50 ms — served from Upstash |
+| Cache refresh (every 4 hours, automatic) | Background — visitors are never blocked |
+| KV env vars not set (fallback mode) | 3–8 s — live scrape, same as original behaviour |
