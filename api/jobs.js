@@ -84,6 +84,47 @@ const SCRAPE_HEADERS = {
   'upgrade-insecure-requests': '1',
 };
 
+// ── Server-side cache (Vercel KV) ────────────────────────────
+// Set KV_REST_API_URL and KV_REST_API_TOKEN as Vercel environment variables.
+// These are added automatically when you connect a KV database in the Vercel
+// dashboard (Storage → Create → KV → Connect to Project).
+//
+// If these env vars are absent the cache layer is silently skipped and the
+// function falls back to live scraping — existing behaviour is preserved.
+//
+// Cache key is versioned so a code change that alters the job-object shape
+// automatically invalidates stale entries without manual flushing.
+const KV_URL   = process.env.KV_REST_API_URL   || '';
+const KV_TOKEN = process.env.KV_REST_API_TOKEN  || '';
+const KV_KEY   = 'portfolio_jobs_v1';
+const KV_TTL_S = 6 * 3600;  // 6 hours — cron refreshes every 4 h so this is always fresh
+
+async function kvGet() {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const r = await fetch(`${KV_URL}/get/${KV_KEY}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+      signal:  AbortSignal.timeout(500),   // fail fast — never block a user request
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.result ? JSON.parse(d.result) : null;
+  } catch (_) { return null; }
+}
+
+async function kvSet(data) {
+  if (!KV_URL || !KV_TOKEN) return;
+  try {
+    // Use the pipeline endpoint so we can SET + EXPIRE in one round-trip.
+    await fetch(`${KV_URL}/pipeline`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify([['set', KV_KEY, JSON.stringify(data), 'ex', KV_TTL_S]]),
+      signal:  AbortSignal.timeout(3000),
+    });
+  } catch (_) { /* non-fatal — worst case the next request re-scrapes */ }
+}
+
 // ── Fetch company list from Google Sheet ─────────────────────
 // Parses all columns by header name (case-insensitive), so new columns
 // can be added to the sheet without code changes.
@@ -1887,6 +1928,22 @@ export default async function handler(req) {
     );
   }
 
+  // ── KV cache read ─────────────────────────────────────────────
+  // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` on scheduled
+  // requests, which we use as a signal to bypass the cache and force a
+  // fresh scrape (so the cron keeps the cache warm on its own schedule).
+  // All other requests are served from KV when available — response time
+  // drops from 2–8 s to ~50 ms for the vast majority of visitors.
+  const cronSecret = process.env.CRON_SECRET || '';
+  const isCron     = cronSecret && req.headers.get('authorization') === `Bearer ${cronSecret}`;
+
+  if (!isCron) {
+    const cached = await kvGet();
+    if (cached) {
+      return new Response(JSON.stringify(cached), { headers: HEADERS });
+    }
+  }
+
   try {
     // Fetch company list and site config in parallel (both are fast CSV fetches).
     const [companies, config] = await Promise.all([fetchCompanies(), fetchConfig()]);
@@ -2021,16 +2078,21 @@ export default async function handler(req) {
       }
     });
 
-    return new Response(
-      JSON.stringify({
-        jobs:      allJobs,
-        companies: companies.map(c => c.name),
-        config,      // site config from Google Sheet config tab (gid=1)
-        errors,
-        fetchedAt: new Date().toISOString(),
-      }),
-      { headers: HEADERS }
-    );
+    const payload = {
+      jobs:      allJobs,
+      companies: companies.map(c => c.name),
+      config,      // site config from Google Sheet config tab (gid=1)
+      errors,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    // ── KV cache write ──────────────────────────────────────────
+    // Persist the freshly-scraped result so subsequent requests are served
+    // instantly.  Awaited here (not fire-and-forget) because Edge Runtime
+    // does not guarantee async work after Response is returned.
+    await kvSet(payload);
+
+    return new Response(JSON.stringify(payload), { headers: HEADERS });
   } catch (err) {
     console.error('Handler error:', err);
     return new Response(

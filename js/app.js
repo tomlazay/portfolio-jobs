@@ -10,7 +10,7 @@ let ALL_JOBS = [];
 // Renders cached jobs instantly, then refreshes in the background.
 // TTL: 5 minutes. Cache is keyed so a new deploy busts it automatically.
 const CACHE_KEY = 'portfolio_jobs_cache_v1';
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes in ms
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes in ms
 
 function cacheLoad() {
   try {
@@ -150,12 +150,21 @@ const STATE_ABBR = {
 // Only matches state names that follow a comma (i.e. the state portion of
 // "City, State"), so standalone city names like "Washington" or already-
 // abbreviated strings like "New York, NY" are left untouched.
+//
+// The regex is built once at module load (not on every call) so repeated
+// normalisation of large job lists doesn't reconstruct it each time.
+const _STATE_ABBR_RE = new RegExp(
+  `,\\s*(${
+    Object.keys(STATE_ABBR)
+      .sort((a, b) => b.length - a.length)
+      .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|')
+  })\\b`,
+  'gi'
+);
+
 function abbreviateStates(str) {
-  const pattern = Object.keys(STATE_ABBR)
-    .sort((a, b) => b.length - a.length)
-    .map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('|');
-  return str.replace(new RegExp(`,\\s*(${pattern})\\b`, 'gi'),
+  return str.replace(_STATE_ABBR_RE,
     (_, state) => `, ${STATE_ABBR[state.toLowerCase()]}`);
 }
 
