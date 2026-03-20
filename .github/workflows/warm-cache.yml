@@ -5,10 +5,9 @@ on:
 
 jobs:
   warm:
-    # Only run when Vercel marks Production as successful
-    if: >
-      github.event.deployment_status.state == 'success' &&
-      github.event.deployment_status.environment == 'Production'
+    # Run when Vercel marks any deployment as successful
+    # (always warms the production URL regardless of which deployment triggered it)
+    if: github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Prime KV cache
