@@ -98,7 +98,7 @@ const SCRAPE_HEADERS = {
 const KV_URL   = process.env.KV_REST_API_URL   || '';
 const KV_TOKEN = process.env.KV_REST_API_TOKEN  || '';
 const KV_KEY   = 'portfolio_jobs_v1';
-const KV_TTL_S = 6 * 3600;  // 6 hours — cron refreshes every 4 h so this is always fresh
+const KV_TTL_S = 25 * 3600;  // 25 hours — outlasts the daily cron interval with buffer
 
 async function kvGet() {
   if (!KV_URL || !KV_TOKEN) return null;
