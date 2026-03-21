@@ -1,5 +1,6 @@
 // ============================================================
 //  api/jobs.js — Vercel Edge Function (runtime: 'edge')
+//  v2 — includes Upstash KV cache + Vercel Cron warm-up
 //
 //  Runs on Cloudflare's edge network so outbound fetch() requests
 //  originate from Cloudflare IPs, which bypasses Cloudflare bot
