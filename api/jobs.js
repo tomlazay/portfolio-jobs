@@ -104,7 +104,7 @@ async function kvGet() {
   try {
     const r = await fetch(`${KV_URL}/get/${KV_KEY}`, {
       headers: { Authorization: `Bearer ${KV_TOKEN}` },
-      signal:  AbortSignal.timeout(500),   // fail fast — never block a user request
+      signal:  AbortSignal.timeout(2000),  // 2 s — allows for Upstash free-tier cold start
     });
     if (!r.ok) return null;
     const d = await r.json();
@@ -1940,7 +1940,9 @@ export default async function handler(req) {
   if (!isCron) {
     const cached = await kvGet();
     if (cached) {
-      return new Response(JSON.stringify(cached), { headers: HEADERS });
+      return new Response(JSON.stringify(cached), {
+        headers: { ...HEADERS, 'X-Cache': 'HIT' },
+      });
     }
   }
 
@@ -2092,7 +2094,9 @@ export default async function handler(req) {
     // does not guarantee async work after Response is returned.
     await kvSet(payload);
 
-    return new Response(JSON.stringify(payload), { headers: HEADERS });
+    return new Response(JSON.stringify(payload), {
+      headers: { ...HEADERS, 'X-Cache': isCron ? 'CRON' : 'MISS' },
+    });
   } catch (err) {
     console.error('Handler error:', err);
     return new Response(
