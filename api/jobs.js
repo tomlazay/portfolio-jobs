@@ -2031,9 +2031,34 @@ export default async function handler(req) {
     // scraper). Without a ceiling, a single slow/hung company can push the total
     // past Vercel's 30 s edge-function wall-clock limit and return a 504.
     const COMPANY_TIMEOUT_MS = 20_000;
+
+    // Retry with exponential backoff — catches transient timeouts, 5xx errors,
+    // and DNS blips that would otherwise cause a company's jobs to vanish.
+    // Up to MAX_RETRIES additional attempts after the first failure.
+    const MAX_RETRIES = 2;          // 3 total attempts (1 initial + 2 retries)
+    const RETRY_BASE_MS = 1000;     // 1s → 2s backoff between retries
+
+    async function fetchWithRetry(company) {
+      let lastError;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          return await fetchOneCompany(company);
+        } catch (err) {
+          lastError = err;
+          // Don't retry on the last attempt
+          if (attempt < MAX_RETRIES) {
+            const delay = RETRY_BASE_MS * Math.pow(2, attempt);  // 1s, 2s
+            console.warn(`Retry ${attempt + 1}/${MAX_RETRIES} for ${company.name} after ${delay}ms: ${err.message}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
+      }
+      throw lastError;
+    }
+
     function withCompanyTimeout(company) {
       return Promise.race([
-        fetchOneCompany(company),
+        fetchWithRetry(company),
         new Promise((_, rej) =>
           setTimeout(() => rej(new Error(`${company.name}: timed out after ${COMPANY_TIMEOUT_MS / 1000}s`)), COMPANY_TIMEOUT_MS)
         ),
@@ -2054,6 +2079,21 @@ export default async function handler(req) {
         return fetchLogoFromHomepage(homeUrl);
       })),
     ]);
+
+    // ── Merge fresh results with cached data ─────────────────────
+    // When a company's scrape fails (even after retries), preserve its
+    // previously-cached jobs rather than dropping them entirely. This
+    // prevents the job list from shrinking due to transient failures.
+    // Read the previous cache for merge purposes (even on cron runs, since
+    // cron is exactly when failures most need fallback data).
+    const previousCache = await kvGet();
+    const previousJobsByCompany = {};
+    if (previousCache?.jobs) {
+      for (const job of previousCache.jobs) {
+        if (!previousJobsByCompany[job.company]) previousJobsByCompany[job.company] = [];
+        previousJobsByCompany[job.company].push(job);
+      }
+    }
 
     const allJobs = [];
     const errors  = [];
@@ -2078,6 +2118,14 @@ export default async function handler(req) {
         const { name, url } = companies[i];
         console.error(`Error fetching ${name} (${url}):`, result.reason?.message);
         errors.push({ company: name, url, error: result.reason?.message || String(result.reason) });
+
+        // Preserve previously-cached jobs for this company so the job list
+        // doesn't shrink due to a transient scraping failure.
+        const staleJobs = previousJobsByCompany[name];
+        if (staleJobs && staleJobs.length > 0) {
+          console.log(`Preserving ${staleJobs.length} cached jobs for ${name} (scrape failed)`);
+          allJobs.push(...staleJobs);
+        }
       }
     });
 
